@@ -28,8 +28,10 @@ const Dashboard = () => {
   }, []);
 
   const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
     if (!session) {
       navigate("/auth");
       return;
@@ -47,14 +49,13 @@ const Dashboard = () => {
       .single();
 
     if (profileData) {
-      // Load company separately if company_id exists
       if (profileData.company_id) {
         const { data: companyData } = await supabase
           .from("companies")
           .select("*")
           .eq("id", profileData.company_id)
           .single();
-        
+
         setProfile({ ...profileData, companies: companyData });
         loadProjects(profileData.company_id);
       } else {
@@ -76,6 +77,7 @@ const Dashboard = () => {
     }
   };
 
+  // 🔴 CHANGED FUNCTION
   const handleSaveCompany = async () => {
     if (!companyName || !companyEmail) {
       toast({
@@ -86,27 +88,38 @@ const Dashboard = () => {
       return;
     }
 
+    if (!user) {
+      toast({
+        title: "Error",
+        description: "No authenticated user found.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Create company
+      // Create company – MUST match table + RLS
       const { data: company, error: companyError } = await supabase
         .from("companies")
         .insert({
+          user_id: user.id,        // <- required for RLS: auth.uid() = user_id
           name: companyName,
-          admin_email: companyEmail,
-          created_by: user.id,
+          email: companyEmail,     // <- matches `email` column in companies table
         })
         .select()
         .single();
 
       if (companyError) throw companyError;
 
-      // Update profile
-      await supabase
+      // Update profile with company_id
+      const { error: profileError } = await supabase
         .from("profiles")
         .update({ company_id: company.id })
         .eq("id", user.id);
+
+      if (profileError) throw profileError;
 
       setShowCompanyDialog(false);
       loadProfile(user.id);
