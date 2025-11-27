@@ -4,22 +4,50 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { z } from "zod";
 
 const signupSchema = z.object({
   name: z.string().regex(/^[A-Za-z\s]+$/, "Name must contain only letters"),
   phone: z.string().min(10, "Phone number is too short"),
-  email: z.string().email("Invalid email").refine((email) => {
-    const domain = email.split("@")[1];
-    return domain && !["gmail.com", "yahoo.com", "hotmail.com", "outlook.com"].includes(domain);
-  }, "Please use a company email address"),
+  email: z
+    .string()
+    .email("Invalid email")
+    .refine((email) => {
+      const domain = email.split("@")[1]?.toLowerCase();
+      if (!domain) return false;
+
+      // TEMP RULE:
+      // - Allow any Gmail address
+      // - Allow any company domain
+      // - Block some common free providers (Yahoo, Hotmail, Outlook)
+      if (domain === "gmail.com") return true;
+
+      const blockedFreeDomains = ["yahoo.com", "hotmail.com", "outlook.com"];
+      return !blockedFreeDomains.includes(domain);
+    }, "Please use Gmail or a company email address"),
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
+
+// convenient aliases for calling edge functions via fetch
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
 const Auth = () => {
   const [searchParams] = useSearchParams();
@@ -27,7 +55,7 @@ const Auth = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"signin" | "signup" | "forgot">(
-    (searchParams.get("mode") as "signin" | "signup" | "forgot") || "signin"
+    (searchParams.get("mode") as "signin" | "signup" | "forgot") || "signin",
   );
 
   // Signup form
@@ -59,7 +87,9 @@ const Auth = () => {
   }, [password]);
 
   const checkUser = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     if (session) {
       // Check if user is verified
       const { data: profile } = await supabase
@@ -67,7 +97,7 @@ const Auth = () => {
         .select("is_verified")
         .eq("id", session.user.id)
         .single();
-      
+
       if (profile?.is_verified) {
         navigate("/dashboard");
       }
@@ -128,20 +158,62 @@ const Auth = () => {
       if (error) throw error;
 
       if (data.user) {
-        // Send verification email
-        await supabase.functions.invoke("send-verification-email", {
-          body: { userId: data.user.id, email },
-        });
-
-        // If joining workspace, send request
-        if (joinWorkspace && companyName && adminEmail) {
-          await supabase.functions.invoke("send-workspace-request", {
-            body: {
-              userId: data.user.id,
-              companyName,
-              adminEmail,
+        // ---- Send verification email via Edge Function (Resend) ----
+        const verifyRes = await fetch(
+          `${SUPABASE_URL}/functions/v1/send-verification-email`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
             },
-          });
+            body: JSON.stringify({ userId: data.user.id, email }),
+          },
+        );
+
+        if (!verifyRes.ok) {
+          const errBody = await verifyRes.json().catch(() => ({}));
+          console.error(
+            "send-verification-email failed",
+            verifyRes.status,
+            errBody,
+          );
+          throw new Error(
+            errBody?.error || "Failed to send verification email",
+          );
+        }
+
+        // ---- If joining workspace, send workspace request ----
+        if (joinWorkspace && companyName && adminEmail) {
+          const wsRes = await fetch(
+            `${SUPABASE_URL}/functions/v1/send-workspace-request`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: SUPABASE_ANON_KEY,
+                Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+              },
+              body: JSON.stringify({
+                userId: data.user.id,
+                companyName,
+                adminEmail,
+              }),
+            },
+          );
+
+          if (!wsRes.ok) {
+            const errBody = await wsRes.json().catch(() => ({}));
+            console.error(
+              "send-workspace-request failed",
+              wsRes.status,
+              errBody,
+            );
+            throw new Error(
+              errBody?.error || "Failed to send workspace request",
+            );
+          }
         }
 
         toast({
@@ -152,7 +224,7 @@ const Auth = () => {
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message || "Something went wrong",
         variant: "destructive",
       });
     } finally {
@@ -339,11 +411,22 @@ const Auth = () => {
                   />
                   <div className="mt-2 space-y-1">
                     <div className="flex gap-1 h-2">
-                      <div className={`flex-1 rounded ${getPasswordColor()}`} style={{ width: `${passwordStrength}%` }} />
-                      <div className="flex-1 rounded bg-muted" style={{ width: `${100 - passwordStrength}%` }} />
+                      <div
+                        className={`flex-1 rounded ${getPasswordColor()}`}
+                        style={{ width: `${passwordStrength}%` }}
+                      />
+                      <div
+                        className="flex-1 rounded bg-muted"
+                        style={{ width: `${100 - passwordStrength}%` }}
+                      />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Password strength: {passwordStrength < 30 ? "Weak" : passwordStrength < 60 ? "Medium" : "Strong"}
+                      Password strength:{" "}
+                      {passwordStrength < 30
+                        ? "Weak"
+                        : passwordStrength < 60
+                        ? "Medium"
+                        : "Strong"}
                     </p>
                   </div>
                 </div>
@@ -352,9 +435,14 @@ const Auth = () => {
                   <Checkbox
                     id="join-workspace"
                     checked={joinWorkspace}
-                    onCheckedChange={(checked) => setJoinWorkspace(checked as boolean)}
+                    onCheckedChange={(checked) =>
+                      setJoinWorkspace(checked as boolean)
+                    }
                   />
-                  <Label htmlFor="join-workspace" className="text-sm font-normal">
+                  <Label
+                    htmlFor="join-workspace"
+                    className="text-sm font-normal"
+                  >
                     Join existing workspace
                   </Label>
                 </div>

@@ -9,7 +9,8 @@ const appUrl = Deno.env.get("APP_URL")!;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
 
 interface RequestBody {
@@ -24,19 +25,34 @@ const handler = async (req: Request): Promise<Response> => {
 
   try {
     const { userId, email }: RequestBody = await req.json();
-    
+
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // 1) Verify the user exists in auth.users
+    const { data: userData, error: userError } =
+      await supabase.auth.admin.getUserById(userId);
+
+    if (userError || !userData?.user) {
+      console.error("User not found for userId:", userId, userError);
+      return new Response(
+        JSON.stringify({ error: "Invalid userId: user does not exist" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        },
+      );
+    }
 
     // Generate verification token
     const token = crypto.randomUUID();
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24);
 
-    // Store token
+    // 2) Insert token with a VALID user_id
     const { error: tokenError } = await supabase
       .from("email_verification_tokens")
       .insert({
-        user_id: userId,
+        user_id: userData.user.id,
         token,
         expires_at: expiresAt.toISOString(),
       });
@@ -45,7 +61,7 @@ const handler = async (req: Request): Promise<Response> => {
 
     // Send email
     const verificationLink = `${appUrl}/verify-email?token=${token}`;
-    
+
     const { error: emailError } = await resend.emails.send({
       from: "VisionM <no-reply@visionm.com>",
       to: [email],
@@ -53,7 +69,7 @@ const handler = async (req: Request): Promise<Response> => {
       html: `
         <h1>Welcome to VisionM!</h1>
         <p>Please verify your email address by clicking the link below:</p>
-        <a href="${verificationLink}" style="display: inline-block; padding: 12px 24px; background-color: #0088cc; color: white; text-decoration: none; border-radius: 4px;">Verify Email</a>
+        <a href="${verificationLink}" style="display:inline-block;padding:12px 24px;background-color:#0088cc;color:white;text-decoration:none;border-radius:4px;">Verify Email</a>
         <p>Or copy and paste this link into your browser:</p>
         <p>${verificationLink}</p>
         <p>This link will expire in 24 hours.</p>
@@ -63,21 +79,18 @@ const handler = async (req: Request): Promise<Response> => {
 
     if (emailError) throw emailError;
 
-    return new Response(
-      JSON.stringify({ success: true }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      }
-    );
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
   } catch (error: any) {
     console.error("Error:", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error.message ?? String(error) }),
       {
         status: 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },
-      }
+      },
     );
   }
 };
