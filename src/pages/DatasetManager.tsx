@@ -23,7 +23,6 @@ const DatasetManager = () => {
   const [userEmail, setUserEmail] = useState("");
   const [projectPassword, setProjectPassword] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [version, setVersion] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [currentDataset, setCurrentDataset] = useState<any>(null);
@@ -68,18 +67,29 @@ const DatasetManager = () => {
   };
 
   const checkDatasetStatus = async (datasetId: string) => {
-    const { data } = await supabase
-      .from("datasets")
-      .select("*, dataset_files(*)")
-      .eq("id", datasetId)
-      .single();
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-    if (data) {
-      if (data.status === "ready" || data.status === "failed") {
-        setPollingDatasetId(null);
-        setCurrentDataset(data);
-        loadDatasets();
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dataset-status/${datasetId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === "ready" || data.status === "failed") {
+          setPollingDatasetId(null);
+          setCurrentDataset(data);
+          loadDatasets();
+        }
       }
+    } catch (error) {
+      console.error("Error checking dataset status:", error);
     }
   };
 
@@ -182,16 +192,31 @@ const DatasetManager = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
+      // Get current max version for this project
+      const { data: existingDatasets } = await supabase
+        .from("datasets")
+        .select("version")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      let nextVersion = "v1";
+      if (existingDatasets && existingDatasets.length > 0 && existingDatasets[0].version) {
+        const currentVersion = existingDatasets[0].version;
+        const versionNum = parseInt(currentVersion.replace("v", "")) || 0;
+        nextVersion = `v${versionNum + 1}`;
+      }
+
       const formData = new FormData();
       formData.append("company", project.company_id);
       formData.append("project", projectId || "");
-      if (version) formData.append("version", version);
+      formData.append("version", nextVersion);
       
-      selectedFiles.forEach((file, index) => {
-        formData.append(`files`, file);
+      selectedFiles.forEach((file) => {
+        formData.append("files", file);
       });
 
-      // Upload files
+      // Upload to /api/dataset/upload endpoint
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-dataset`, {
         method: "POST",
         headers: {
@@ -207,11 +232,10 @@ const DatasetManager = () => {
       setPollingDatasetId(datasetId);
       setShowUploadDialog(false);
       setSelectedFiles([]);
-      setVersion("");
       
       toast({
         title: "Upload started",
-        description: "Your dataset is being processed...",
+        description: `Your dataset (${nextVersion}) is being processed...`,
       });
     } catch (error: any) {
       toast({
@@ -377,16 +401,7 @@ const DatasetManager = () => {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="version">Version (Optional)</Label>
-              <Input
-                id="version"
-                value={version}
-                onChange={(e) => setVersion(e.target.value)}
-                placeholder="v1.0"
-              />
-            </div>
-            <div>
-              <Label>Files</Label>
+              <Label>Files or Folder</Label>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -400,11 +415,11 @@ const DatasetManager = () => {
                 className="w-full"
                 onClick={() => fileInputRef.current?.click()}
               >
-                Select Files
+                Select Files or Folder
               </Button>
               {selectedFiles.length > 0 && (
                 <p className="text-sm text-muted-foreground mt-2">
-                  {selectedFiles.length} files selected
+                  {selectedFiles.length} files selected (Version will be auto-generated)
                 </p>
               )}
             </div>

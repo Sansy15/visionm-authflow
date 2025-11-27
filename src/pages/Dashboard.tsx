@@ -42,18 +42,24 @@ const Dashboard = () => {
   const loadProfile = async (userId: string) => {
     const { data: profileData } = await supabase
       .from("profiles")
-      .select("*, companies(*)")
+      .select("*")
       .eq("id", userId)
       .single();
 
     if (profileData) {
-      setProfile(profileData);
-
-      // Check if first login and no company details
-      if (!profileData.company_id) {
-        setShowCompanyDialog(true);
-      } else {
+      // Load company separately if company_id exists
+      if (profileData.company_id) {
+        const { data: companyData } = await supabase
+          .from("companies")
+          .select("*")
+          .eq("id", profileData.company_id)
+          .single();
+        
+        setProfile({ ...profileData, companies: companyData });
         loadProjects(profileData.company_id);
+      } else {
+        setProfile(profileData);
+        setShowCompanyDialog(true);
       }
     }
   };
