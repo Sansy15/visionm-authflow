@@ -112,7 +112,7 @@ CREATE POLICY "Users can view their company"
   ON public.companies FOR SELECT
   USING (auth.uid() IN (SELECT id FROM public.profiles WHERE company_id = companies.id));
 
-CREATE POLICY "Users can create companies"
+CREATE POLICY " Users can createcompanies"
   ON public.companies FOR INSERT
   WITH CHECK (auth.uid() = created_by);
 

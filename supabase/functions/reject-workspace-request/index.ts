@@ -57,30 +57,48 @@ const handler = async (req: Request): Promise<Response> => {
       });
     }
 
-    // 4) HTML response to admin
-    return new Response(
-      `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Request Rejected</title>
-          <style>
-            body { font-family: system-ui; padding: 40px; text-align: center; }
-            .error { color: #ef4444; font-size: 48px; }
-          </style>
-        </head>
-        <body>
-          <div class="error">×</div>
-          <h1>Workspace Request Rejected</h1>
-          <p>The user's request to join the workspace has been rejected and the user has been notified by email.</p>
-        </body>
-      </html>
-      `,
-      {
-        status: 200,
-        headers: { "Content-Type": "text/html" },
-      }
-    );
+    // 4) Return JSON response (for Dashboard handler) or HTML (for direct browser access)
+    const acceptHeader = req.headers.get("accept") || "";
+    const isJsonRequest = acceptHeader.includes("application/json") || req.headers.get("content-type")?.includes("application/json");
+
+    if (isJsonRequest) {
+      // Return JSON for Dashboard handler
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: "Request rejected" 
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    } else {
+      // Return HTML for direct browser access (email links)
+      return new Response(
+        `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Request Rejected</title>
+            <style>
+              body { font-family: system-ui; padding: 40px; text-align: center; }
+              .error { color: #ef4444; font-size: 48px; }
+            </style>
+          </head>
+          <body>
+            <div class="error">×</div>
+            <h1>Workspace Request Rejected</h1>
+            <p>The user's request to join the workspace has been rejected and the user has been notified by email.</p>
+          </body>
+        </html>
+        `,
+        {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }
+      );
+    }
   } catch (error: any) {
     console.error("Error:", error);
     return new Response(`Error: ${error.message}`, { status: 500 });

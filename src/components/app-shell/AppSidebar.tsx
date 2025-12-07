@@ -30,7 +30,27 @@ interface AppSidebarProps {
 export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, isAdmin, loading: profileLoading } = useProfile();
+  const { profile, isAdmin, company, loading: profileLoading } = useProfile();
+  
+  // Debug admin status in development (only when profile loading is complete)
+  useEffect(() => {
+    if (import.meta.env.DEV && !profileLoading) {
+      console.log("[AppSidebar] Admin Status Check:", {
+        hasProfile: !!profile,
+        hasCompany: !!company,
+        profileEmail: profile?.email,
+        companyAdminEmail: company?.admin_email,
+        companyFromProfile: profile?.companies?.admin_email,
+        emailsMatch: profile?.email === company?.admin_email,
+        emailsMatchWithProfile: profile?.email === profile?.companies?.admin_email,
+        isAdmin,
+        companyId: profile?.company_id,
+        shouldShowTeam: isAdmin && profile?.company_id,
+        shouldShowAddUser: isAdmin && profile?.company_id,
+        loading: profileLoading,
+      });
+    }
+  }, [profile, company, isAdmin, profileLoading]);
 
   const [projectsOpen, setProjectsOpen] = useState<boolean>(false);
   const [teamOpen, setTeamOpen] = useState<boolean>(false);
@@ -78,7 +98,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
   const openProject = (id: string) => navigate(`/dataset/${id}`);
 
   const handleCreateProject = () => navigate("/dashboard?action=create-project");
-  const handleSimulation = () => navigate("/simulation");
+  const handleSimulation = () => navigate("/dashboard");
 
   // When Add User clicked: ensure company exists and fetch access token, then open invite dialog
   const handleAddUser = async () => {
@@ -135,11 +155,6 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
                 label: "View Members",
                 href: "/dashboard/team/members",
                 active: isActive("/dashboard/team/members"),
-              },
-              {
-                label: "Invitations",
-                href: "/dashboard/team/invitations",
-                active: isActive("/dashboard/team/invitations"),
               },
             ],
           },
@@ -219,22 +234,6 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className={cn(
-                        "w-full justify-start",
-                        location.pathname === "/dashboard/projects" && "bg-secondary"
-                      )}
-                      onClick={() => {
-                        navigate("/dashboard/projects");
-                        onNavigate?.();
-                      }}
-                    >
-                      <FolderKanban className="mr-2 h-4 w-4" />
-                      All Projects
-                    </Button>
-
-                    <Button
-                      variant="ghost"
-                      size="sm"
                       className="w-full justify-start"
                       onClick={handleCreateProject}
                       disabled={!companyId}
@@ -243,55 +242,57 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
                       Create Project
                     </Button>
 
-                    {projects.length > 0 && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="w-full justify-start"
-                          onClick={() => setManageOpen(!manageOpen)}
-                        >
-                          <FileText className="mr-2 h-4 w-4" />
-                          Manage Projects
-                          <span className="ml-auto">
-                            {manageOpen ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </span>
-                        </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start"
+                      onClick={() => setManageOpen(!manageOpen)}
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      Manage Projects
+                      <span className="ml-auto">
+                        {manageOpen ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                      </span>
+                    </Button>
 
-                        {manageOpen && (
-                          <div className="ml-4 mt-1 space-y-1 max-h-60 overflow-auto">
-                            {loadingProjects && (
-                              <div className="px-4 py-2 text-xs text-muted-foreground">
-                                Loading...
-                              </div>
-                            )}
-
-                            {!loadingProjects &&
-                              projects.map((p) => (
-                                <Button
-                                  key={p.id}
-                                  variant="ghost"
-                                  size="sm"
-                                  className={cn(
-                                    "w-full justify-start",
-                                    location.pathname === `/dataset/${p.id}` &&
-                                      "bg-secondary"
-                                  )}
-                                  onClick={() => {
-                                    openProject(p.id);
-                                    onNavigate?.();
-                                  }}
-                                >
-                                  <span className="truncate">{p.name}</span>
-                                </Button>
-                              ))}
+                    {manageOpen && (
+                      <div className="ml-4 mt-1 space-y-1 max-h-60 overflow-auto">
+                        {loadingProjects && (
+                          <div className="px-4 py-2 text-xs text-muted-foreground">
+                            Loading...
                           </div>
                         )}
-                      </>
+
+                        {!loadingProjects && projects.length === 0 && (
+                          <div className="px-4 py-2 text-xs text-muted-foreground">
+                            No projects yet
+                          </div>
+                        )}
+
+                        {!loadingProjects &&
+                          projects.map((p) => (
+                            <Button
+                              key={p.id}
+                              variant="ghost"
+                              size="sm"
+                              className={cn(
+                                "w-full justify-start",
+                                location.pathname === `/dataset/${p.id}` &&
+                                  "bg-secondary"
+                              )}
+                              onClick={() => {
+                                openProject(p.id);
+                                onNavigate?.();
+                              }}
+                            >
+                              <span className="truncate">{p.name}</span>
+                            </Button>
+                          ))}
+                      </div>
                     )}
 
                     <Button

@@ -29,7 +29,7 @@ import { useProfile } from "@/contexts/ProfileContext";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { EmptyState } from "@/components/pages/EmptyState";
 import { LoadingState } from "@/components/pages/LoadingState";
-import { FolderKanban, Plus } from "lucide-react";
+import { FolderKanban } from "lucide-react";
 
 type ViewMode = "overview" | "projects" | "simulation" | "members";
 
@@ -37,7 +37,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
-  const { profile, user, isAdmin: contextIsAdmin, reloadProfile, loading: profileLoading } = useProfile();
+  const { profile, user, isAdmin: contextIsAdmin, company, reloadProfile, loading: profileLoading } = useProfile();
 
   const [projects, setProjects] = useState<any[]>([]);
   const [showCompanyDialog, setShowCompanyDialog] = useState(false);
@@ -84,9 +84,80 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, searchParams, profileLoading]);
 
+  // Handle join request approve/reject from email links
+  const handleJoinRequestFromEmail = async (token: string, action: string) => {
+    if (!user) {
+      toast({
+        title: "Authentication required",
+        description: "Please sign in to process this request.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const functionName = action === "approve" 
+        ? "approve-workspace-request" 
+        : "reject-workspace-request";
+      
+      const response = await fetch(`/functions/v1/${functionName}?token=${encodeURIComponent(token)}`, {
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+        },
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Failed to ${action} request`);
+      }
+
+      // Try to parse as JSON first, fallback to text
+      let result;
+      const contentType = response.headers.get("content-type");
+      if (contentType?.includes("application/json")) {
+        result = await response.json();
+      } else {
+        // If HTML response, consider it success (for direct browser access)
+        result = { success: true };
+      }
+
+      toast({
+        title: action === "approve" ? "Request approved" : "Request rejected",
+        description: action === "approve" 
+          ? "The user has been added to the company." 
+          : "The join request has been rejected.",
+      });
+
+      // Reload profile in case user was added to company
+      if (action === "approve") {
+        await reloadProfile();
+      }
+    } catch (error: any) {
+      console.error(`Error ${action}ing join request:`, error);
+      toast({
+        title: `Failed to ${action} request`,
+        description: error.message || "An error occurred while processing the request.",
+        variant: "destructive",
+      });
+    }
+  };
+
   // Handle URL action parameter (e.g., ?action=create-project)
   useEffect(() => {
     const action = searchParams.get("action");
+    const token = searchParams.get("token");
+    
+    // Handle join request approve/reject from email links
+    if (token && (action === "approve" || action === "reject")) {
+      handleJoinRequestFromEmail(token, action);
+      // Clear params after handling
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete("token");
+      newParams.delete("action");
+      setSearchParams(newParams);
+      return;
+    }
     
     if (action === "create-project" && profile?.company_id) {
       setShowProjectDialog(true);
@@ -296,7 +367,9 @@ const Dashboard = () => {
       const userEmail = user.email || profile?.email;
       
       // Ensure profile exists before creating company (required for foreign key)
-      if (!profile) {
+      let currentProfile = profile;
+      
+      if (!currentProfile) {
         // Create profile if it doesn't exist
         const { error: profileError } = await supabase
           .from("profiles")
@@ -314,65 +387,147 @@ const Dashboard = () => {
           throw new Error("Failed to create profile. Please try again.");
         }
         
-        // Profile will be reloaded via context after company creation
+        // Wait a moment for the profile to be committed
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Reload profile to ensure it's available
+        await reloadProfile();
+        
+        // Fetch the profile we just created
+        const { data: profileData, error: profileFetchError } = await supabase
+          .from("profiles")
+          .select("id, email, name")
+          .eq("id", user.id)
+          .single();
+        
+        if (profileFetchError || !profileData) {
+          console.error("Profile fetch error:", profileFetchError);
+          throw new Error("Profile was created but could not be retrieved. Please refresh and try again.");
+        }
+        
+        currentProfile = profileData;
       }
       
-      const { data: company, error: insertError } = await supabase
-        .from("companies")
-        .insert({
-          name: companyName,
-          admin_email: userEmail, // user's email = admin
-          created_by: user.id, // use created_by to match database schema
-        })
-        .select()
-        .single();
+      // Use email from profile
+      const profileEmail = currentProfile.email || userEmail;
+      if (!profileEmail) {
+        throw new Error("Unable to get email for company creation. Please ensure your profile has an email.");
+      }
+      
+      // Use Edge Function to create company (bypasses RLS issues)
+      const { data: createCompanyData, error: invokeError } = await supabase.functions.invoke("create-company", {
+        body: {
+          companyName,
+          adminEmail: profileEmail,
+        },
+      });
 
-      if (insertError) {
-        console.error("Full Supabase error:", {
-          message: insertError.message,
-          details: insertError.details,
-          hint: insertError.hint,
-          code: insertError.code,
-          error: insertError,
-        });
-        throw insertError;
+      // Handle errors - extract actual error message from Edge Function response
+      if (invokeError) {
+        console.error("Company creation error:", invokeError);
+        console.error("Error context:", invokeError.context);
+        console.error("Response data:", createCompanyData);
+        
+        let errorMessage = "Failed to create company";
+        
+        // Priority 1: Check if data contains error message (Edge Function's JSON response)
+        // Sometimes data is populated even when there's an error
+        if (createCompanyData?.error) {
+          errorMessage = createCompanyData.error;
+          // Include details if available
+          if (createCompanyData.details) {
+            errorMessage += `: ${createCompanyData.details}`;
+          }
+        } else if (createCompanyData && typeof createCompanyData === 'object' && 'error' in createCompanyData) {
+          errorMessage = (createCompanyData as any).error;
+          if ((createCompanyData as any).details) {
+            errorMessage += `: ${(createCompanyData as any).details}`;
+          }
+        }
+        // Priority 2: Check error.context (FunctionsHttpError) - contains the actual response body
+        else if (invokeError.context) {
+          try {
+            // error.context might be a Response object or already parsed
+            let errorData: any;
+            if (typeof invokeError.context.json === 'function') {
+              errorData = await invokeError.context.json();
+            } else if (typeof invokeError.context === 'object') {
+              errorData = invokeError.context;
+            }
+            
+            if (errorData?.error) {
+              errorMessage = errorData.error;
+              if (errorData.details) {
+                errorMessage += `: ${errorData.details}`;
+              }
+            } else if (errorData?.message) {
+              errorMessage = errorData.message;
+            }
+          } catch (parseError) {
+            // If parsing fails, fall back to error message
+            console.warn("Could not parse error context:", parseError);
+          }
+        }
+        // Priority 3: Use error message
+        else if (invokeError.message) {
+          errorMessage = invokeError.message;
+        }
+        
+        throw new Error(errorMessage);
       }
 
+      if (!createCompanyData?.ok) {
+        let errorMsg = createCompanyData?.error || "Failed to create company";
+        // Include details if available
+        if (createCompanyData?.details) {
+          errorMsg += `: ${createCompanyData.details}`;
+        }
+        console.error("Company creation error:", createCompanyData);
+        throw new Error(errorMsg);
+      }
+
+      const company = createCompanyData.company;
+      
       if (!company) {
         throw new Error("Failed to create company");
       }
 
-      // Update profile with company_id
+      // Profile is already updated by the edge function, but verify
       const { data: profileRow, error: profileUpdateError } = await supabase
         .from("profiles")
-        .update({
-          company_id: company.id,
-        })
+        .select("company_id")
         .eq("id", user.id)
-        .select()
         .single();
 
       if (profileUpdateError) {
-        console.error("Error updating profile with company_id:", profileUpdateError);
-        // Company was created but profile update failed - try to reload profile
-        const { data: reloadedProfile } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", user.id)
-          .maybeSingle();
-        
-        toast({
-          title: "Warning",
-          description: "Company created but profile update had issues. Please refresh the page.",
-          variant: "destructive",
-        });
-      } else {
-        // Profile updated successfully
+        console.error("Error verifying profile update:", profileUpdateError);
+        // Company was created, profile should be updated by edge function
+        // Just reload profile to sync state
       }
       setShowCompanyDialog(false);
       companyForm.resetForm();
-      // Reload profile to get updated company_id
+      
+      // Small delay to ensure Edge Function has committed the profile update
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Reload profile to get updated company_id and email
       await reloadProfile();
+      
+      // Wait a bit more for context to update after reload
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Verify admin status after reload (use the context values already available)
+      if (import.meta.env.DEV) {
+        console.log("[Dashboard] After company creation:", {
+          hasProfile: !!profile,
+          hasCompany: !!profile?.company_id,
+          isAdmin: contextIsAdmin,
+          profileEmail: profile?.email,
+          companyAdminEmail: profile?.companies?.admin_email,
+          companyFromContext: company?.admin_email,
+        });
+      }
+      
       if (company?.id) {
         loadProjects(company.id);
       }
@@ -651,31 +806,18 @@ const Dashboard = () => {
         description="Manage your projects, datasets, and simulation workspace from this dashboard."
       />
 
-      {/* Create Project Card */}
-      <div className="mb-8">
-        <Card 
-          className="border-dashed border-2 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors max-w-sm"
-          onClick={openCreateProject}
-        >
-          <CardContent className="py-8 flex flex-col items-center justify-center text-center">
-            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-3">
-              <Plus className="h-6 w-6 text-primary" />
-            </div>
-            <h3 className="font-semibold mb-1">Create New Project</h3>
-            <p className="text-xs text-muted-foreground">Start a new dataset project</p>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* CONTENT: Overview placeholder (default) */}
-      {activeView === "overview" && projects.length === 0 && (
+      {activeView === "overview" && !profile?.company_id && (
         <EmptyState
           icon={FolderKanban}
-          title="No projects yet"
-          description="Create your first project to get started organizing your datasets."
+          title="Welcome to VisionM"
+          description="Get started by creating a workspace (company) to organize your projects and datasets."
           action={{
-            label: "Create Project",
-            onClick: openCreateProject,
+            label: "Create Workspace",
+            onClick: () => {
+              setDialogMode("create");
+              setShowCompanyDialog(true);
+            },
           }}
         />
       )}

@@ -63,16 +63,21 @@ const Auth = () => {
 
   // Listen for auth state changes to handle invite acceptance after magic link sign-in
   useEffect(() => {
-    if (!inviteToken) return;
-
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // When user signs in via magic link, accept the invite
-      if (event === "SIGNED_IN" && session?.user) {
+      // When user signs in via magic link or confirms email, check for pending invites
+      if ((event === "SIGNED_IN" || event === "USER_UPDATED") && session?.user) {
         // Small delay to ensure session is fully established
         setTimeout(() => {
-          handleInviteAcceptanceAfterSignIn();
+          // If invite token in URL, use it
+          if (inviteToken) {
+            handleInviteAcceptanceAfterSignIn();
+          } else {
+            // No invite token in URL - check if user has pending invite in metadata
+            // This handles the case where user confirms via Supabase's "Confirm your signup" email
+            checkForPendingInviteFromMetadata(session.user);
+          }
         }, 500);
       }
     });
@@ -137,6 +142,42 @@ const Auth = () => {
     checkSessionAndTriggerOtp();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inviteToken]);
+
+  // Check for pending invite from user metadata (when user confirms via Supabase email)
+  const checkForPendingInviteFromMetadata = async (user: any) => {
+    if (!user?.user_metadata?.invite_token) return;
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) return;
+
+      const inviteTokenFromMetadata = user.user_metadata.invite_token;
+      
+      // Accept the invite using token from metadata
+      const acceptRes = await fetch("/functions/v1/accept-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: inviteTokenFromMetadata, userId: user.id }),
+      });
+      
+      const acceptJson = await acceptRes.json();
+      if (acceptRes.ok && acceptJson?.ok) {
+        toast({
+          title: "Invite accepted",
+          description: "You have been added to the company. Redirecting to dashboard...",
+        });
+        setTimeout(() => {
+          navigate("/dashboard");
+        }, 1500);
+      } else {
+        console.error("Invite acceptance from metadata failed:", acceptJson?.error);
+      }
+    } catch (error) {
+      console.error("Error checking for pending invite from metadata:", error);
+    }
+  };
 
   // Handle invite acceptance after sign-in (for magic link flow)
   const handleInviteAcceptanceAfterSignIn = async () => {

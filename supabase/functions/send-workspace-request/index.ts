@@ -81,9 +81,9 @@ serve(async (req: Request): Promise<Response> => {
     const requestId = insertData.id;
 
     // 2) Prepare links and email content
-    // Use frontend URLs that admins will open (not internal function endpoints unless intended)
-    const approveLink = `${appUrl}/dashboard/admin/requests?token=${token}&action=approve`;
-    const rejectLink = `${appUrl}/dashboard/admin/requests?token=${token}&action=reject`;
+    // Use frontend URLs that admins will open (Dashboard handles the approve/reject actions)
+    const approveLink = `${appUrl}/dashboard?token=${token}&action=approve`;
+    const rejectLink = `${appUrl}/dashboard?token=${token}&action=reject`;
 
     // 3) Send email via Resend
     let emailSent = false;

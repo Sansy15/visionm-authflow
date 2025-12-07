@@ -1,10 +1,18 @@
 // supabase/functions/create-invite/index.ts
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { Resend } from "https://esm.sh/resend@4.0.0";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const APP_URL = Deno.env.get("APP_URL")!; // e.g. http://localhost:8080 or your deployed app
+const RESEND_KEY = Deno.env.get("RESEND_API_KEY")!;
+const INVITE_FROM = Deno.env.get("INVITE_FROM") || "VisionM <no-reply@your-verified-domain.com>";
+
+// Normalize APP_URL to remove trailing slashes
+const normalizedAppUrl = APP_URL.replace(/\/+$/, '');
+
+const resend = RESEND_KEY ? new Resend(RESEND_KEY) : null;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, {
   auth: { persistSession: false },
@@ -179,20 +187,19 @@ serve(async (req: Request) => {
     }
 
     // Frontend invite link (same one you copy in the UI)
-    // Normalize APP_URL to remove trailing slashes to prevent double slashes
-    const normalizedAppUrl = APP_URL.replace(/\/+$/, '');
     const inviteLink = `${normalizedAppUrl}/auth?invite=${encodeURIComponent(token)}`;
 
     // ---- Check if user exists in Supabase Auth ----
     let existingUser = null;
     try {
-      const { data: userData, error: userError } = await supabase.auth.admin.getUserByEmail(inviteEmail);
-      if (!userError && userData?.user) {
-        existingUser = userData.user;
+      // Use listUsers and filter by email (getUserByEmail might not be available in all versions)
+      const { data: usersData, error: userError } = await supabase.auth.admin.listUsers();
+      if (!userError && usersData?.users) {
+        existingUser = usersData.users.find((u: any) => u.email === inviteEmail) || null;
       }
     } catch (err) {
       // User doesn't exist or error checking - will create new user
-      console.log("User check:", err);
+      console.log("User check error:", err);
     }
 
     let authUserId: string | null = null;
@@ -233,74 +240,269 @@ serve(async (req: Request) => {
 
       authUserId = newUser?.user?.id ?? null;
 
-      // Step 2: Send magic link email
-      const { error: otpError } = await supabase.auth.signInWithOtp({
+      // Step 2: Generate magic link (without sending email)
+      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+        type: "magiclink",
         email: inviteEmail,
         options: {
-          emailRedirectTo: inviteLink,
-          data: {
-            company_id: companyId,
-            company_name: company.name ?? null,
-            invite_token: token,
-          },
+          redirectTo: inviteLink,
         },
       });
 
-      if (otpError) {
-        console.error("signInWithOtp error (new user):", otpError);
+      if (linkError || !linkData?.properties?.action_link) {
+        console.error("generateLink error (new user):", linkError);
         await supabase
           .from("company_invites")
           .update({
             status: "email_failed",
-            error_message: otpError.message ?? String(otpError),
+            error_message: linkError?.message ?? "Failed to generate magic link",
           })
           .eq("id", inserted.id);
 
         return new Response(
           JSON.stringify({
             success: false,
-            error: "Failed to send magic link email",
-            details: otpError.message ?? String(otpError),
+            error: "Failed to generate magic link",
+            details: linkError?.message ?? String(linkError),
             inviteLink,
           }),
           { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
         );
       }
+
+      const magicLink = linkData.properties.action_link;
+
+      // Step 3: Send custom email via Resend
+      if (resend) {
+        try {
+          console.log("Sending custom email via Resend to:", inviteEmail);
+          const emailResult = await resend.emails.send({
+            from: INVITE_FROM,
+            to: [inviteEmail],
+            subject: `You've been invited to join ${company.name ?? "a workspace"} on VisionM`,
+            html: `
+              <h2>You've been invited!</h2>
+              <p>Hello${inviteName ? ` ${inviteName}` : ""},</p>
+              <p>You have been invited to join <strong>${company.name ?? "a workspace"}</strong> on VisionM.</p>
+              <p>Click the link below to sign in and accept the invitation:</p>
+              <p style="margin:18px 0;">
+                <a href="${magicLink}" style="display:inline-block;padding:12px 24px;background-color:#0ea5e9;color:#fff;text-decoration:none;border-radius:6px;">Sign In & Accept Invitation</a>
+              </p>
+              <p>If the button does not work, copy and paste this link into your browser:</p>
+              <p style="word-break:break-all;">${magicLink}</p>
+              <hr/>
+              <small>This invitation will expire on ${new Date(expiresAt).toLocaleDateString()}.</small>
+            `,
+          });
+          // Check if Resend actually succeeded
+          if (emailResult.error) {
+            console.error("Resend email failed:", emailResult.error);
+            throw new Error(emailResult.error.message || "Resend API error");
+          }
+          console.log("Resend email sent successfully:", emailResult.data);
+        } catch (emailError) {
+          console.error("Resend email error (new user):", emailError);
+          // Don't fail - fall back to Supabase email
+          console.log("Falling back to Supabase email due to Resend error");
+          const { error: otpError } = await supabase.auth.signInWithOtp({
+            email: inviteEmail,
+            options: {
+              emailRedirectTo: inviteLink,
+              data: {
+                company_id: companyId,
+                company_name: company.name ?? null,
+                invite_token: token,
+              },
+            },
+          });
+          if (otpError) {
+            console.error("Fallback signInWithOtp also failed:", otpError);
+            await supabase
+              .from("company_invites")
+              .update({
+                status: "email_failed",
+                error_message: `Resend failed: ${emailError?.message}, Supabase fallback also failed: ${otpError.message}`,
+              })
+              .eq("id", inserted.id);
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: "Failed to send email",
+                details: emailError?.message ?? String(emailError),
+                inviteLink,
+              }),
+              { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
+            );
+          }
+        }
+      } else {
+        // Fallback: Use Supabase's built-in email if Resend is not configured
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          email: inviteEmail,
+          options: {
+            emailRedirectTo: inviteLink,
+            data: {
+              company_id: companyId,
+              company_name: company.name ?? null,
+              invite_token: token,
+            },
+          },
+        });
+
+        if (otpError) {
+          console.error("signInWithOtp error (new user, fallback):", otpError);
+          await supabase
+            .from("company_invites")
+            .update({
+              status: "email_failed",
+              error_message: otpError.message ?? String(otpError),
+            })
+            .eq("id", inserted.id);
+
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Failed to send magic link email",
+              details: otpError.message ?? String(otpError),
+              inviteLink,
+            }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
+          );
+        }
+      }
     } else {
-      // ---- Path B: User exists - Send magic link directly ----
+      // ---- Path B: User exists - Generate magic link and send custom email ----
       authUserId = existingUser.id;
 
-      const { error: otpError } = await supabase.auth.signInWithOtp({
+      // Generate magic link (without sending email)
+      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+        type: "magiclink",
         email: inviteEmail,
         options: {
-          emailRedirectTo: inviteLink,
-          data: {
-            company_id: companyId,
-            company_name: company.name ?? null,
-            invite_token: token,
-          },
+          redirectTo: inviteLink,
         },
       });
 
-      if (otpError) {
-        console.error("signInWithOtp error (existing user):", otpError);
+      if (linkError || !linkData?.properties?.action_link) {
+        console.error("generateLink error (existing user):", linkError);
         await supabase
           .from("company_invites")
           .update({
             status: "email_failed",
-            error_message: otpError.message ?? String(otpError),
+            error_message: linkError?.message ?? "Failed to generate magic link",
           })
           .eq("id", inserted.id);
 
         return new Response(
           JSON.stringify({
             success: false,
-            error: "Failed to send magic link email",
-            details: otpError.message ?? String(otpError),
+            error: "Failed to generate magic link",
+            details: linkError?.message ?? String(linkError),
             inviteLink,
           }),
           { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
         );
+      }
+
+      const magicLink = linkData.properties.action_link;
+
+      // Send custom email via Resend
+      if (resend) {
+        try {
+          console.log("Sending custom email via Resend to:", inviteEmail);
+          const emailResult = await resend.emails.send({
+            from: INVITE_FROM,
+            to: [inviteEmail],
+            subject: `You've been invited to join ${company.name ?? "a workspace"} on VisionM`,
+            html: `
+              <h2>You've been invited!</h2>
+              <p>Hello${inviteName ? ` ${inviteName}` : ""},</p>
+              <p>You have been invited to join <strong>${company.name ?? "a workspace"}</strong> on VisionM.</p>
+              <p>Click the link below to sign in and accept the invitation:</p>
+              <p style="margin:18px 0;">
+                <a href="${magicLink}" style="display:inline-block;padding:12px 24px;background-color:#0ea5e9;color:#fff;text-decoration:none;border-radius:6px;">Sign In & Accept Invitation</a>
+              </p>
+              <p>If the button does not work, copy and paste this link into your browser:</p>
+              <p style="word-break:break-all;">${magicLink}</p>
+              <hr/>
+              <small>This invitation will expire on ${new Date(expiresAt).toLocaleDateString()}.</small>
+            `,
+          });
+          // Check if Resend actually succeeded
+          if (emailResult.error) {
+            console.error("Resend email failed:", emailResult.error);
+            throw new Error(emailResult.error.message || "Resend API error");
+          }
+          console.log("Resend email sent successfully:", emailResult.data);
+        } catch (emailError) {
+          console.error("Resend email error (existing user):", emailError);
+          // Don't fail - fall back to Supabase email
+          console.log("Falling back to Supabase email due to Resend error");
+          const { error: otpError } = await supabase.auth.signInWithOtp({
+            email: inviteEmail,
+            options: {
+              emailRedirectTo: inviteLink,
+              data: {
+                company_id: companyId,
+                company_name: company.name ?? null,
+                invite_token: token,
+              },
+            },
+          });
+          if (otpError) {
+            console.error("Fallback signInWithOtp also failed:", otpError);
+            await supabase
+              .from("company_invites")
+              .update({
+                status: "email_failed",
+                error_message: `Resend failed: ${emailError?.message}, Supabase fallback also failed: ${otpError.message}`,
+              })
+              .eq("id", inserted.id);
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: "Failed to send email",
+                details: emailError?.message ?? String(emailError),
+                inviteLink,
+              }),
+              { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
+            );
+          }
+        }
+      } else {
+        // Fallback: Use Supabase's built-in email if Resend is not configured
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          email: inviteEmail,
+          options: {
+            emailRedirectTo: inviteLink,
+            data: {
+              company_id: companyId,
+              company_name: company.name ?? null,
+              invite_token: token,
+            },
+          },
+        });
+
+        if (otpError) {
+          console.error("signInWithOtp error (existing user, fallback):", otpError);
+          await supabase
+            .from("company_invites")
+            .update({
+              status: "email_failed",
+              error_message: otpError.message ?? String(otpError),
+            })
+            .eq("id", inserted.id);
+
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Failed to send magic link email",
+              details: otpError.message ?? String(otpError),
+              inviteLink,
+            }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
+          );
+        }
       }
     }
 

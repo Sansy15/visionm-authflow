@@ -7,11 +7,12 @@ import { AppBreadcrumbs } from "./Breadcrumbs";
 import { ProfileProvider, useProfile } from "@/contexts/ProfileContext";
 import { useRoutePersistence } from "@/hooks/useRoutePersistence";
 import { useToast } from "@/hooks/use-toast";
+import { LoadingState } from "@/components/pages/LoadingState";
 
 const AppShellContent = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { sessionReady, error } = useProfile();
+  const { sessionReady, error, loading } = useProfile();
 
   // Handle navigation on sign out (ProfileContext handles state clearing)
   useEffect(() => {
@@ -41,6 +42,16 @@ const AppShellContent = () => {
 
   // Restore route after session is ready
   useRoutePersistence(sessionReady);
+
+  // Show loading state while session is being hydrated
+  // Only show if we're not on auth page (to avoid blocking auth flow)
+  if (!sessionReady && !window.location.pathname.includes("/auth")) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <LoadingState message="Restoring session..." />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-background">

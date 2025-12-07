@@ -43,16 +43,27 @@ const handler = async (req: Request): Promise<Response> => {
       .select("id")
       .eq("name", request.company_name)
       .eq("admin_email", request.admin_email)
-      .single();
+      .maybeSingle();
 
     let companyId = existingCompany?.id as string | undefined;
 
     if (!companyId) {
+      // Get requester's email from their profile to set as admin (consistent with Side Panel logic)
+      const { data: requesterProfile } = await supabase
+        .from("profiles")
+        .select("email")
+        .eq("id", request.user_id)
+        .maybeSingle();
+
+      if (!requesterProfile?.email) {
+        throw new Error("Requester email not found. Cannot create company.");
+      }
+
       const { data: newCompany, error: companyError } = await supabase
         .from("companies")
         .insert({
           name: request.company_name,
-          admin_email: request.admin_email,
+          admin_email: requesterProfile.email, // Use requester's email to ensure they are admin (consistent with Side Panel)
           created_by: request.user_id,
         })
         .select()
@@ -102,30 +113,49 @@ const handler = async (req: Request): Promise<Response> => {
       });
     }
 
-    // 7) HTML page shown to the admin
-    return new Response(
-      `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Request Approved</title>
-          <style>
-            body { font-family: system-ui; padding: 40px; text-align: center; }
-            .success { color: #22c55e; font-size: 48px; }
-          </style>
-        </head>
-        <body>
-          <div class="success">✓</div>
-          <h1>Workspace Request Approved</h1>
-          <p>The user has been added to the workspace and notified by email.</p>
-        </body>
-      </html>
-      `,
-      {
-        status: 200,
-        headers: { "Content-Type": "text/html" },
-      }
-    );
+    // 7) Return JSON response (for Dashboard handler) or HTML (for direct browser access)
+    const acceptHeader = req.headers.get("accept") || "";
+    const isJsonRequest = acceptHeader.includes("application/json") || req.headers.get("content-type")?.includes("application/json");
+
+    if (isJsonRequest) {
+      // Return JSON for Dashboard handler
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: "Request approved",
+          companyId: companyId 
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    } else {
+      // Return HTML for direct browser access (email links)
+      return new Response(
+        `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Request Approved</title>
+            <style>
+              body { font-family: system-ui; padding: 40px; text-align: center; }
+              .success { color: #22c55e; font-size: 48px; }
+            </style>
+          </head>
+          <body>
+            <div class="success">✓</div>
+            <h1>Workspace Request Approved</h1>
+            <p>The user has been added to the workspace and notified by email.</p>
+          </body>
+        </html>
+        `,
+        {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }
+      );
+    }
   } catch (error: any) {
     console.error("Error:", error);
     return new Response(`Error: ${error.message}`, { status: 500 });

@@ -1,11 +1,7 @@
 // src/components/InviteUserDialog.tsx
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
-import { FormFieldWrapper } from "@/components/FormFieldWrapper";
-import { useFormValidation } from "@/hooks/useFormValidation";
-import { inviteUserSchema, type InviteUserFormData } from "@/lib/validations/authSchemas";
+import { Input } from "@/components/ui/input";
 
 interface Props {
   companyId: string;
@@ -16,40 +12,15 @@ export const InviteUserDialog: React.FC<Props> = ({
   companyId,
   accessToken,
 }) => {
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
-  const [showAlreadyMemberError, setShowAlreadyMemberError] = useState(false);
-
-  const inviteForm = useFormValidation({
-    schema: inviteUserSchema,
-    initialValues: {
-      email: "",
-      name: "",
-    },
-    validateOnChange: false,
-    validateOnBlur: true,
-  });
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
-    
-    if (!inviteForm.validateForm()) {
-      toast({
-        title: "Please check your details",
-        description: "Fix the highlighted errors before sending invite.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     if (!companyId) {
-      toast({
-        title: "Error",
-        description: "Company id missing",
-        variant: "destructive",
-      });
+      alert("Company id missing");
       return;
     }
 
@@ -67,8 +38,8 @@ export const InviteUserDialog: React.FC<Props> = ({
         },
         body: JSON.stringify({
           companyId,
-          inviteEmail: inviteForm.values.email,
-          inviteName: inviteForm.values.name,
+          inviteEmail: email,
+          inviteName: name,
         }),
       });
 
@@ -89,25 +60,11 @@ export const InviteUserDialog: React.FC<Props> = ({
           data?.message ||
           data?.raw ||
           `Invite failed with status ${res.status}`;
-        
-        // Check if error is "User already a member"
-        if (data?.errorCode === "USER_ALREADY_MEMBER" || msg.includes("already a member")) {
-          setShowAlreadyMemberError(true);
-          inviteForm.setValue("email", ""); // Clear email field
-          setLoading(false);
-          return;
-        }
-        
-        toast({
-          title: "Invite failed",
-          description: msg,
-          variant: "destructive",
-        });
+        alert("Invite failed: " + msg);
         if (data?.inviteLink) {
           console.log("Manual invite link:", data.inviteLink);
           setLastInviteLink(data.inviteLink);
         }
-        setLoading(false);
         return;
       }
 
@@ -116,19 +73,12 @@ export const InviteUserDialog: React.FC<Props> = ({
         setLastInviteLink(data.inviteLink);
       }
 
-      inviteForm.resetForm();
-      setShowAlreadyMemberError(false);
-      toast({
-        title: "Invite sent successfully",
-        description: "The invitation has been sent to the user.",
-      });
+      setEmail("");
+      setName("");
+      alert("Invite sent.");
     } catch (err: any) {
       console.error("invite_error", err);
-      toast({
-        title: "Invite failed",
-        description: err?.message ?? String(err),
-        variant: "destructive",
-      });
+      alert("Invite failed: " + (err?.message ?? String(err)));
     } finally {
       setLoading(false);
     }
@@ -138,19 +88,8 @@ export const InviteUserDialog: React.FC<Props> = ({
     if (!lastInviteLink) return;
     navigator.clipboard
       .writeText(lastInviteLink)
-      .then(() => {
-        toast({
-          title: "Link copied",
-          description: "Invite link has been copied to clipboard.",
-        });
-      })
-      .catch(() => {
-        toast({
-          title: "Copy failed",
-          description: "Failed to copy invite link.",
-          variant: "destructive",
-        });
-      });
+      .then(() => alert("Invite link copied"))
+      .catch(() => alert("Failed to copy invite link"));
   }
 
   return (
@@ -160,32 +99,23 @@ export const InviteUserDialog: React.FC<Props> = ({
         onSubmit={handleInvite}
         className="flex flex-col gap-3 items-stretch"
       >
-        <FormFieldWrapper
-          label="Email"
-          name="email"
-          type="email"
-          value={inviteForm.values.email}
-          onChange={(e) => {
-            inviteForm.handleChange("email")(e);
-            setShowAlreadyMemberError(false); // Clear error when user types
-          }}
-          onBlur={inviteForm.handleBlur("email")}
-          error={inviteForm.getFieldError("email")}
-          touched={inviteForm.isFieldTouched("email")}
-          placeholder="user@example.com"
-          required
-        />
-        <FormFieldWrapper
-          label="Name (Optional)"
-          name="name"
-          type="text"
-          value={inviteForm.values.name || ""}
-          onChange={inviteForm.handleChange("name")}
-          onBlur={inviteForm.handleBlur("name")}
-          error={inviteForm.getFieldError("name")}
-          touched={inviteForm.isFieldTouched("name")}
-          placeholder="Optional name"
-        />
+        <div className="flex flex-col gap-2">
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="user@example.com"
+            type="email"
+            required
+            className="w-full"
+          />
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Optional name"
+            type="text"
+            className="w-full"
+          />
+        </div>
 
         <div className="flex justify-end">
           <Button type="submit" disabled={loading}>
@@ -193,29 +123,6 @@ export const InviteUserDialog: React.FC<Props> = ({
           </Button>
         </div>
       </form>
-
-      {/* ALREADY A MEMBER ERROR + VIEW MEMBERS BUTTON */}
-      {showAlreadyMemberError && (
-        <div className="flex flex-col gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-md">
-          <p className="text-sm text-destructive font-medium">
-            User already a member
-          </p>
-          <p className="text-xs text-muted-foreground">
-            This user is already a member of your company.
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              navigate("/dashboard?view=members");
-            }}
-            className="w-full"
-          >
-            View Members
-          </Button>
-        </div>
-      )}
 
       {/* LAST INVITE LINK + COPY BUTTON BELOW INPUTS */}
       {lastInviteLink && (

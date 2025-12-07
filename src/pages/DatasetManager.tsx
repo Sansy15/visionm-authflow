@@ -84,6 +84,8 @@ const DatasetManager = () => {
   const [version, setVersion] = useState<string>("");
 
   const [files, setFiles] = useState<File[]>([]);
+  const [labelledFolderError, setLabelledFolderError] = useState<string | null>(null);
+  const [unlabelledFolderError, setUnlabelledFolderError] = useState<string | null>(null);
 
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [statusMessage, setStatusMessage] = useState<string>("Idle");
@@ -196,10 +198,76 @@ const DatasetManager = () => {
   };
 
   // ------- File selection -------
-  const handleFilesSelected = (fileList: FileList | null) => {
-    if (!fileList) return;
+  const handleFilesSelected = (fileList: FileList | null, isLabelled: boolean = true) => {
+    // Clear previous errors immediately for the appropriate input
+    if (isLabelled) {
+      setLabelledFolderError(null);
+    } else {
+      setUnlabelledFolderError(null);
+    }
 
+    if (!fileList || fileList.length === 0) {
+      const errorMsg = "Please select a folder with files.";
+      if (isLabelled) {
+        setLabelledFolderError(errorMsg);
+      } else {
+        setUnlabelledFolderError(errorMsg);
+      }
+      toast({
+        title: "Invalid selection",
+        description: errorMsg,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Run validation immediately
     try {
+      const selectedFiles = Array.from(fileList);
+
+      // Check file count immediately
+      if (selectedFiles.length > MAX_FILES) {
+        const errorMsg = `You can upload at most ${MAX_FILES} files. Selected folder contains ${selectedFiles.length} files.`;
+        if (isLabelled) {
+          setLabelledFolderError(errorMsg);
+        } else {
+          setUnlabelledFolderError(errorMsg);
+        }
+        toast({
+          title: "Too many files",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Check file sizes immediately
+      const oversizedFiles: string[] = [];
+      for (const file of selectedFiles) {
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          oversizedFiles.push(file.name);
+        }
+      }
+
+      if (oversizedFiles.length > 0) {
+        const maxSizeMB = Math.round(MAX_FILE_SIZE_BYTES / (1024 * 1024));
+        const errorMsg = oversizedFiles.length === 1
+          ? `${oversizedFiles[0]} exceeds ${maxSizeMB} MB file size limit.`
+          : `${oversizedFiles.length} file(s) exceed ${maxSizeMB} MB file size limit.`;
+        if (isLabelled) {
+          setLabelledFolderError(errorMsg);
+        } else {
+          setUnlabelledFolderError(errorMsg);
+        }
+        toast({
+          title: "File size limit exceeded",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // All validations passed - process files
       const { files: validFiles } = buildFilesFromFileList(fileList);
 
       setFiles(validFiles);
@@ -208,10 +276,19 @@ const DatasetManager = () => {
       setMetadata(null);
       setStatusProgress(null);
       setStatusPercent(null);
+      // Clear errors for both inputs on success
+      setLabelledFolderError(null);
+      setUnlabelledFolderError(null);
     } catch (err: any) {
+      const errorMsg = err.message ?? "File selection failed.";
+      if (isLabelled) {
+        setLabelledFolderError(errorMsg);
+      } else {
+        setUnlabelledFolderError(errorMsg);
+      }
       toast({
         title: "Invalid selection",
-        description: err.message ?? "File selection failed.",
+        description: errorMsg,
         variant: "destructive",
       });
     }
@@ -703,8 +780,13 @@ const DatasetManager = () => {
                   </Button>
                   <span className="text-xs text-muted-foreground">All files & subfolders preserved • Max {MAX_FILES} files</span>
                 </div>
+                {labelledFolderError && (
+                  <p className="mt-1 text-xs text-destructive" role="alert">
+                    {labelledFolderError}
+                  </p>
+                )}
                 <input id="labelled-folder-input" type="file" multiple // @ts-ignore
-                  webkitdirectory="true" className="hidden" onChange={(e) => handleFilesSelected(e.target.files)} />
+                  webkitdirectory="true" className="hidden" onChange={(e) => handleFilesSelected(e.target.files, true)} />
               </div>
             </CardContent>
           )}
@@ -728,8 +810,13 @@ const DatasetManager = () => {
                   </Button>
                   <span className="text-xs text-muted-foreground">All files & subfolders preserved • Max {MAX_FILES} files</span>
                 </div>
+                {unlabelledFolderError && (
+                  <p className="mt-1 text-xs text-destructive" role="alert">
+                    {unlabelledFolderError}
+                  </p>
+                )}
                 <input id="unlabelled-folder-input" type="file" multiple // @ts-ignore
-                  webkitdirectory="true" className="hidden" onChange={(e) => handleFilesSelected(e.target.files)} />
+                  webkitdirectory="true" className="hidden" onChange={(e) => handleFilesSelected(e.target.files, false)} />
               </div>
             </CardContent>
           )}

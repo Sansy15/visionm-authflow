@@ -14,11 +14,31 @@ import { useIsMobile } from "@/hooks/use-mobile";
 
 export const AppHeader: React.FC = () => {
   const navigate = useNavigate();
-  const { profile, isAdmin } = useProfile();
+  const { profile, isAdmin, company, loading, sessionReady } = useProfile();
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [showRequestsPanel, setShowRequestsPanel] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isMobile = useIsMobile();
+
+  // Debug admin status in development (only when profile loading is complete)
+  useEffect(() => {
+    if (import.meta.env.DEV && loading !== undefined && !loading) {
+      console.log("[AppHeader] Admin Status Check:", {
+        hasProfile: !!profile,
+        hasCompany: !!company,
+        profileEmail: profile?.email,
+        companyAdminEmail: company?.admin_email,
+        companyFromProfile: profile?.companies?.admin_email,
+        emailsMatch: profile?.email === company?.admin_email,
+        emailsMatchWithProfile: profile?.email === profile?.companies?.admin_email,
+        isAdmin,
+        shouldShowBell: isAdmin && profile?.email,
+        shouldShowPanel: isAdmin && profile?.email,
+        loading,
+        sessionReady,
+      });
+    }
+  }, [profile, company, isAdmin, loading, sessionReady]);
 
   // Poll for pending requests (every 30 seconds) if admin
   useEffect(() => {
@@ -87,7 +107,16 @@ export const AppHeader: React.FC = () => {
           {/* Right: Actions */}
           <div className="flex items-center gap-2">
             {!profile?.company_id && (
-              <JoinCompanyDialog />
+              <>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => navigate("/dashboard?action=create-company")}
+                >
+                  Create Workspace
+                </Button>
+                <JoinCompanyDialog />
+              </>
             )}
 
             {/* Notification Bell Icon - Admin Only */}
