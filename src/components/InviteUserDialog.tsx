@@ -28,13 +28,15 @@ export const InviteUserDialog: React.FC<Props> = ({
 
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const url = `${supabaseUrl}/functions/v1/create-invite`;
 
       const res = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
+          "apikey": supabaseAnonKey,
+          "Authorization": `Bearer ${accessToken || supabaseAnonKey}`,
         },
         body: JSON.stringify({
           companyId,

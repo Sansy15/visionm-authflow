@@ -24,3 +24,4 @@ CREATE POLICY "Users can view their company"
     created_by = auth.uid()
   );
 
+

@@ -6,8 +6,9 @@ const ROUTE_STORAGE_KEY = "visionm_last_route";
 /**
  * Hook to persist and restore the current route on page refresh
  * Saves route to localStorage and restores it after session hydration
+ * Only works when user is authenticated
  */
-export const useRoutePersistence = (isSessionReady: boolean) => {
+export const useRoutePersistence = (isSessionReady: boolean, user: any) => {
   const location = useLocation();
   const navigate = useNavigate();
   const hasRestored = useRef(false);
@@ -22,9 +23,10 @@ export const useRoutePersistence = (isSessionReady: boolean) => {
 
   // Save route to localStorage on navigation changes (only for app routes)
   // Only save AFTER we've restored (to avoid overwriting saved route during initial load)
+  // Only save when user is authenticated
   useEffect(() => {
-    // Only save if we've already restored (session is ready and restore has happened)
-    if (isSessionReady && hasRestored.current) {
+    // Only save if we've already restored (session is ready and restore has happened) and user is authenticated
+    if (isSessionReady && user && hasRestored.current) {
       const isAppRoute = location.pathname.startsWith("/dashboard") || 
                         location.pathname.startsWith("/account") ||
                         location.pathname.startsWith("/dataset");
@@ -37,11 +39,11 @@ export const useRoutePersistence = (isSessionReady: boolean) => {
         }
       }
     }
-  }, [location, isSessionReady]);
+  }, [location, isSessionReady, user]);
 
-  // Restore route after session is ready (only once)
+  // Restore route after session is ready and user is authenticated (only once)
   useEffect(() => {
-    if (!isSessionReady || hasRestored.current) return;
+    if (!isSessionReady || !user || hasRestored.current) return;
 
     try {
       const savedRoute = localStorage.getItem(ROUTE_STORAGE_KEY);
@@ -124,7 +126,7 @@ export const useRoutePersistence = (isSessionReady: boolean) => {
       console.warn("Failed to restore route from localStorage:", error);
       hasRestored.current = true;
     }
-  }, [isSessionReady, location.pathname, location.search, navigate]);
+  }, [isSessionReady, user, location.pathname, location.search, navigate]);
 
   return null;
 };

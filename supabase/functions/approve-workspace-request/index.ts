@@ -7,13 +7,39 @@ const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const frontendUrl = Deno.env.get("FRONTEND_URL")!; // e.g. http://localhost:5173
 const resend = new Resend(Deno.env.get("RESEND_API_KEY")!);
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 const handler = async (req: Request): Promise<Response> => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   try {
     const url = new URL(req.url);
-    const token = url.searchParams.get("token");
+    // Support token from query params (for email links) or body (for invoke)
+    let token = url.searchParams.get("token");
+    
+    if (!token) {
+      try {
+        const body = await req.json().catch(() => ({}));
+        token = body?.token;
+      } catch {
+        // If JSON parsing fails, token stays null
+      }
+    }
 
     if (!token) {
-      return new Response("Invalid token", { status: 400 });
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid token" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -26,7 +52,13 @@ const handler = async (req: Request): Promise<Response> => {
       .single();
 
     if (fetchError || !request) {
-      return new Response("Request not found", { status: 404 });
+      return new Response(
+        JSON.stringify({ success: false, error: "Request not found" }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     // 2) Update request status to approved
@@ -46,6 +78,7 @@ const handler = async (req: Request): Promise<Response> => {
       .maybeSingle();
 
     let companyId = existingCompany?.id as string | undefined;
+    let isNewCompany = false;
 
     if (!companyId) {
       // Get requester's email from their profile to set as admin (consistent with Side Panel logic)
@@ -71,12 +104,18 @@ const handler = async (req: Request): Promise<Response> => {
 
       if (companyError) throw companyError;
       companyId = newCompany.id;
+      isNewCompany = true; // Mark that we created a new company
     }
 
-    // 4) Update user profile with company_id
+    // 4) Update user profile with company_id and set role
+    // If company was just created, requester is admin (role='admin')
+    // Otherwise, user is joining existing company (role='member')
     const { error: profileError } = await supabase
       .from("profiles")
-      .update({ company_id: companyId })
+      .update({ 
+        company_id: companyId,
+        role: isNewCompany ? 'admin' : 'member'
+      })
       .eq("id", request.user_id);
 
     if (profileError) throw profileError;
@@ -127,7 +166,7 @@ const handler = async (req: Request): Promise<Response> => {
         }),
         {
           status: 200,
-          headers: { "Content-Type": "application/json" },
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     } else {
@@ -152,13 +191,19 @@ const handler = async (req: Request): Promise<Response> => {
         `,
         {
           status: 200,
-          headers: { "Content-Type": "text/html" },
+          headers: { ...corsHeaders, "Content-Type": "text/html" },
         }
       );
     }
   } catch (error: any) {
     console.error("Error:", error);
-    return new Response(`Error: ${error.message}`, { status: 500 });
+    return new Response(
+      JSON.stringify({ success: false, error: error.message || "Internal server error" }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 };
 

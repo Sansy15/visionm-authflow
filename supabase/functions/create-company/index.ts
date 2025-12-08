@@ -124,12 +124,17 @@ serve(async (req) => {
       }
     }
 
-    // Check if company already exists
-    const { data: existingCompany } = await supabase
+    // Check if company already exists (case-insensitive, trimmed)
+    // Normalize company name for comparison
+    const normalizedCompanyName = companyName.trim().toLowerCase();
+    const { data: allCompanies } = await supabase
       .from("companies")
-      .select("id, name")
-      .eq("name", companyName)
-      .maybeSingle();
+      .select("id, name");
+    
+    // Find case-insensitive match
+    const existingCompany = allCompanies?.find(
+      (c: any) => c.name && c.name.trim().toLowerCase() === normalizedCompanyName
+    );
 
     if (existingCompany) {
       return new Response(
@@ -146,10 +151,11 @@ serve(async (req) => {
     }
 
     // Create company (using service role, bypasses RLS)
+    // Trim company name before inserting to ensure consistency
     const { data: company, error: companyError } = await supabase
       .from("companies")
       .insert({
-        name: companyName,
+        name: companyName.trim(),
         admin_email: adminEmail,
         email: adminEmail, // Set email column to match admin_email
         created_by: user.id,
@@ -189,12 +195,14 @@ serve(async (req) => {
       );
     }
 
-    // Update profile with company_id and ensure email matches admin_email
+    // Update profile with company_id, role='admin', and ensure email matches admin_email
     // This ensures profile.email === company.admin_email for admin detection
+    // Sets role='admin' explicitly for the company creator
     const { error: updateProfileError } = await supabase
       .from("profiles")
       .update({ 
         company_id: company.id,
+        role: 'admin', // Set creator as admin
         email: adminEmail, // Ensure profile email matches company admin_email
       })
       .eq("id", user.id);

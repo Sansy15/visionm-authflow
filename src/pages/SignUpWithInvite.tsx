@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/PasswordInput";
 
 export default function SignUpWithInvite() {
   const [searchParams] = useSearchParams();
@@ -21,9 +22,10 @@ export default function SignUpWithInvite() {
     (async () => {
       setValidating(true);
       try {
-        const res = await fetch(`/functions/v1/validate-invite?token=${encodeURIComponent(inviteToken)}`);
-        const json = await res.json();
-        if (!res.ok || !json?.ok) {
+        const { data: json, error } = await supabase.functions.invoke("validate-invite", {
+          body: { token: inviteToken },
+        });
+        if (error || !json?.ok) {
           setErrorMsg(json?.error || "Invalid invite");
           setValidating(false);
           return;
@@ -82,13 +84,10 @@ export default function SignUpWithInvite() {
 
       // call accept-invite server function with token and new user.id
       if (inviteToken) {
-        const acceptRes = await fetch("/functions/v1/accept-invite", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: inviteToken, userId: user.id })
+        const { data: acceptJson, error: acceptError } = await supabase.functions.invoke("accept-invite", {
+          body: { token: inviteToken, userId: user.id },
         });
-        const acceptJson = await acceptRes.json();
-        if (!acceptRes.ok || !acceptJson?.ok) {
+        if (acceptError || !acceptJson?.ok) {
           // show error but user account exists; support manual recovery.
           setErrorMsg(acceptJson?.error || "Failed to accept invite");
           setLoading(false);
@@ -120,7 +119,7 @@ export default function SignUpWithInvite() {
 
         <label>
           <div className="text-sm text-muted-foreground">Password</div>
-          <Input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+          <PasswordInput required value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
 
         <div>

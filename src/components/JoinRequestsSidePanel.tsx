@@ -25,6 +25,7 @@ interface JoinRequest {
   status: string;
   created_at: string;
   user_id: string;
+  token: string;
   profiles: {
     name: string;
     email: string;
@@ -57,16 +58,29 @@ export const JoinRequestsSidePanel: React.FC<JoinRequestsSidePanelProps> = ({
 
       if (requestsError) throw requestsError;
 
-      // Then fetch profiles for each request
+      // Fetch user info for each request using RPC function (bypasses RLS)
       const requestsWithProfiles = await Promise.all(
         (requestsData || []).map(async (request) => {
           if (!request.user_id) return { ...request, profiles: null };
 
-          const { data: profileData } = await supabase
-            .from("profiles")
-            .select("name, email")
-            .eq("id", request.user_id)
-            .maybeSingle();
+          // Use RPC function to get user info (bypasses RLS)
+          const { data: userInfo, error: userInfoError } = await supabase
+            .rpc("get_join_request_user_info", { request_user_id: request.user_id });
+
+          // If RPC fails, try direct query as fallback
+          let profileData = null;
+          if (userInfoError || !userInfo || userInfo.length === 0) {
+            // Fallback to direct query (may fail due to RLS, but we try)
+            const { data: fallbackData } = await supabase
+              .from("profiles")
+              .select("name, email")
+              .eq("id", request.user_id)
+              .maybeSingle();
+            profileData = fallbackData;
+          } else {
+            // RPC function returns array, get first result
+            profileData = userInfo[0] || null;
+          }
 
           return {
             ...request,
@@ -100,70 +114,18 @@ export const JoinRequestsSidePanel: React.FC<JoinRequestsSidePanelProps> = ({
 
     setActionLoading(requestId);
     try {
-      // 1. Update request status to approved
-      const { error: updateError } = await supabase
-        .from("workspace_join_requests")
-        .update({ status: "approved" })
-        .eq("id", requestId);
+      // Use Edge Function to approve request (bypasses RLS)
+      // The Edge Function uses service role key and can update any profile
+      const { data, error } = await supabase.functions.invoke("approve-workspace-request", {
+        body: { token: request.token },
+      });
 
-      if (updateError) throw updateError;
-
-      // 2. Get or find company
-      const { data: existingCompany } = await supabase
-        .from("companies")
-        .select("id")
-        .eq("name", request.company_name)
-        .eq("admin_email", request.admin_email)
-        .maybeSingle();
-
-      let companyId = existingCompany?.id;
-
-      // 3. If company doesn't exist, create it
-      if (!companyId) {
-        // Get requester's email from their profile to set as admin
-        const { data: requesterProfile } = await supabase
-          .from("profiles")
-          .select("email")
-          .eq("id", request.user_id)
-          .maybeSingle();
-
-        // Get requester's email for admin_email - must have email to create company
-        if (!requesterProfile?.email) {
-          throw new Error("Requester email not found. Cannot create company.");
-        }
-        const requesterAdminEmail = requesterProfile.email;
-        
-        const { data: newCompany, error: companyError } = await supabase
-          .from("companies")
-          .insert({
-            name: request.company_name,
-            admin_email: requesterAdminEmail, // Use requester's email to ensure they are admin
-            created_by: request.user_id, // Use created_by to match database schema
-          })
-          .select()
-          .single();
-
-        if (companyError) throw companyError;
-        companyId = newCompany.id;
+      if (error) {
+        console.error("[JoinRequestsSidePanel] Approval error:", error);
+        throw error;
       }
 
-      // 4. Update user's profile with company_id
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .update({ company_id: companyId })
-        .eq("id", request.user_id);
-
-      if (profileError) throw profileError;
-
-      // 5. Send approval email (optional - can be done via edge function)
-      try {
-        await supabase.functions.invoke("send-approval-email", {
-          body: { requestId, userId: request.user_id },
-        });
-      } catch (emailError) {
-        console.error("Error sending approval email:", emailError);
-        // Don't fail the whole operation if email fails
-      }
+      console.log("[JoinRequestsSidePanel] Request approved successfully:", data);
 
       toast({
         title: "Request approved",

@@ -9,7 +9,17 @@ const resend = new Resend(Deno.env.get("RESEND_API_KEY")!);
 const handler = async (req: Request): Promise<Response> => {
   try {
     const url = new URL(req.url);
-    const token = url.searchParams.get("token");
+    // Support token from query params (for email links) or body (for invoke)
+    let token = url.searchParams.get("token");
+    
+    if (!token) {
+      try {
+        const body = await req.json().catch(() => ({}));
+        token = body?.token;
+      } catch {
+        // If JSON parsing fails, token stays null
+      }
+    }
 
     if (!token) {
       return new Response("Invalid token", { status: 400 });

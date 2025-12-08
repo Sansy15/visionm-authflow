@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { LoadingState } from "@/components/pages/LoadingState";
 import { EmptyState } from "@/components/pages/EmptyState";
@@ -8,11 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Building2 } from "lucide-react";
 
 export const SettingsWorkspacePage: React.FC = () => {
-  const { profile, isAdmin, loading } = useProfile();
+  const { sessionReady, user, profile, isAdmin, loading } = useProfile();
   const [showProfileDialog, setShowProfileDialog] = useState(false);
 
-  if (loading) {
+  if (!sessionReady || loading) {
     return <LoadingState message="Loading workspace settings..." />;
+  }
+
+  if (sessionReady && !user) {
+    return null; // Will be redirected by ProtectedRoutes
   }
 
   if (!profile?.company_id) {
@@ -66,4 +70,5 @@ export const SettingsWorkspacePage: React.FC = () => {
     </div>
   );
 };
+
 

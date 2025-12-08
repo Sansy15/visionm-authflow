@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { InviteUserDialog } from "@/components/InviteUserDialog";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import {
   LayoutDashboard,
   FolderKanban,

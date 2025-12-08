@@ -4,15 +4,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppHeader } from "./AppHeader";
 import { AppSidebar } from "./AppSidebar";
 import { AppBreadcrumbs } from "./Breadcrumbs";
-import { ProfileProvider, useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { useRoutePersistence } from "@/hooks/useRoutePersistence";
 import { useToast } from "@/hooks/use-toast";
-import { LoadingState } from "@/components/pages/LoadingState";
 
 const AppShellContent = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { sessionReady, error, loading } = useProfile();
+  const { sessionReady, user, error } = useProfile();
 
   // Handle navigation on sign out (ProfileContext handles state clearing)
   useEffect(() => {
@@ -40,19 +39,11 @@ const AppShellContent = () => {
     }
   }, [sessionReady, error, toast]);
 
-  // Restore route after session is ready
-  useRoutePersistence(sessionReady);
+  // Restore route after session is ready and user is authenticated
+  useRoutePersistence(sessionReady, user);
 
-  // Show loading state while session is being hydrated
-  // Only show if we're not on auth page (to avoid blocking auth flow)
-  if (!sessionReady && !window.location.pathname.includes("/auth")) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <LoadingState message="Restoring session..." />
-      </div>
-    );
-  }
-
+  // This component only renders when sessionReady && user (gated by ProtectedRoutes)
+  // So we can safely render the UI here
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <AppHeader />
@@ -75,10 +66,6 @@ const AppShellContent = () => {
 };
 
 export const AppShell = () => {
-  return (
-    <ProfileProvider>
-      <AppShellContent />
-    </ProfileProvider>
-  );
+  return <AppShellContent />;
 };
 

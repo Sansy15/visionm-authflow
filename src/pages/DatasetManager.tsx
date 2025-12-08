@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useProfile } from "@/hooks/useProfile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +13,22 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { Grid3x3, List, X, Download, FileText } from "lucide-react";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiUrl = (path: string) => {
@@ -34,6 +50,20 @@ interface DatasetMetadata {
   testCount?: number;
   folders?: Record<string, { images: number; labels: number }>;
   previews?: Array<{ path: string; url?: string; thumbUrl?: string; thumbData?: string }>;
+  files?: Array<{
+    id?: string;
+    _id?: string;
+    storedName?: string;
+    originalName?: string;
+    name?: string;
+    type?: string;
+    size?: number;
+    folder?: string;
+    storedPath?: string;
+    path?: string;
+    thumbnailAvailable?: boolean;
+    url?: string;
+  }>;
 }
 
 interface StatusResponse {
@@ -61,13 +91,19 @@ interface VersionEntry {
 
 interface FileEntry {
   id: string;
-  name: string;
-  path: string;
+  storedName?: string;
+  originalName: string;
+  type?: string;
   size?: number;
-  mime?: string;
   folder?: string;
-  thumbUrl?: string;
+  storedPath: string;
+  thumbnailAvailable?: boolean;
   url?: string;
+  // Legacy fields for backward compatibility
+  name?: string;
+  path?: string;
+  thumbUrl?: string;
+  mime?: string;
 }
 
 const MAX_FILES = 5000;
@@ -78,12 +114,14 @@ const DatasetManager = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const [user, setUser] = useState<any>(null);
+  const { sessionReady, user } = useProfile();
   const [project, setProject] = useState<any>(null);
   const [companyName, setCompanyName] = useState<string>("");
   const [version, setVersion] = useState<string>("");
 
   const [files, setFiles] = useState<File[]>([]);
+  const [selectedFolderName, setSelectedFolderName] = useState<string | null>(null);
+  const [selectedFolderType, setSelectedFolderType] = useState<"labelled" | "unlabelled" | null>(null);
   const [labelledFolderError, setLabelledFolderError] = useState<string | null>(null);
   const [unlabelledFolderError, setUnlabelledFolderError] = useState<string | null>(null);
 
@@ -104,6 +142,21 @@ const DatasetManager = () => {
   const [folderTree, setFolderTree] = useState<any | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
   const [thumbnailCache, setThumbnailCache] = useState<Record<string, string>>({});
+  
+  // Drive-style preview state
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [folderFiles, setFolderFiles] = useState<FileEntry[]>([]);
+  const [folderFilesLoading, setFolderFilesLoading] = useState(false);
+  const [folderFilesPage, setFolderFilesPage] = useState(1);
+  const [folderFilesTotal, setFolderFilesTotal] = useState(0);
+  const [folderFilesTotalPages, setFolderFilesTotalPages] = useState(0);
+  const [fileTypeFilter, setFileTypeFilter] = useState<"all" | "image" | "label">("all");
+  const [fileSort, setFileSort] = useState<"name" | "size">("name");
+  const [fileSortOrder, setFileSortOrder] = useState<"asc" | "desc">("asc");
+  const [viewMode, setViewMode] = useState<"tree" | "grid">("tree");
+  const [selectedImageFile, setSelectedImageFile] = useState<FileEntry | null>(null);
+  const [selectedLabelFile, setSelectedLabelFile] = useState<FileEntry | null>(null);
+  const [labelFileContent, setLabelFileContent] = useState<string | null>(null);
 
   // ------- Auth header helper -------
   const getAuthHeaders = async () => {
@@ -116,6 +169,15 @@ const DatasetManager = () => {
 
   // ------- Init: load auth + project + company -------
   useEffect(() => {
+    // Early return if session not ready
+    if (!sessionReady) return;
+
+    // Redirect if no user
+    if (sessionReady && !user) {
+      navigate("/auth?mode=signin");
+      return;
+    }
+
     const init = async () => {
       if (!projectId) {
         toast({
@@ -127,19 +189,8 @@ const DatasetManager = () => {
         return;
       }
 
-      // Wait for session before making any DB calls
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.user?.id) {
-        navigate("/auth?mode=signin");
-        return;
-      }
-
-      setUser(session.user);
-
       // DB request - Supabase client automatically includes Authorization header
+      // Session is already ready and user exists (checked above)
       const { data: projectData, error: projectError } = await supabase
         .from("projects")
         .select("id, name, company_id")
@@ -171,8 +222,11 @@ const DatasetManager = () => {
       }
     };
 
-    void init();
-  }, [projectId, navigate, toast]);
+    // Only run init when session is ready and user exists
+    if (sessionReady && user) {
+      void init();
+    }
+  }, [sessionReady, user, projectId, navigate, toast]);
 
   const displayProjectName = project?.name ?? "Unnamed Project";
 
@@ -195,6 +249,22 @@ const DatasetManager = () => {
     }
 
     return { files: validFiles };
+  };
+
+  // ------- Deselect folder -------
+  const handleDeselectFolder = () => {
+    setFiles([]);
+    setSelectedFolderName(null);
+    setSelectedFolderType(null);
+    setStatusMessage("Idle");
+    setUploadStatus("idle");
+    setLabelledFolderError(null);
+    setUnlabelledFolderError(null);
+    // Clear file inputs
+    const labelledInput = document.getElementById("labelled-folder-input") as HTMLInputElement | null;
+    const unlabelledInput = document.getElementById("unlabelled-folder-input") as HTMLInputElement | null;
+    if (labelledInput) labelledInput.value = "";
+    if (unlabelledInput) unlabelledInput.value = "";
   };
 
   // ------- File selection -------
@@ -221,11 +291,42 @@ const DatasetManager = () => {
       return;
     }
 
-    // Run validation immediately
+    // Run validation immediately after folder selection
     try {
       const selectedFiles = Array.from(fileList);
 
-      // Check file count immediately
+      // Check for .txt files FIRST (immediate validation)
+      const txtFiles = selectedFiles.filter(file => 
+        file.name.toLowerCase().endsWith('.txt')
+      );
+
+      if (isLabelled) {
+        // Labelled folder must contain at least one .txt file
+        if (txtFiles.length === 0) {
+          const errorMsg = "Please include at least one .txt file in this folder.";
+          setLabelledFolderError(errorMsg);
+          toast({
+            title: "Invalid selection",
+            description: errorMsg,
+            variant: "destructive",
+          });
+          return;
+        }
+      } else {
+        // Unlabelled folder must contain zero .txt files
+        if (txtFiles.length > 0) {
+          const errorMsg = "Remove all .txt files from this folder to proceed.";
+          setUnlabelledFolderError(errorMsg);
+          toast({
+            title: "Invalid selection",
+            description: errorMsg,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      // Check file count
       if (selectedFiles.length > MAX_FILES) {
         const errorMsg = `You can upload at most ${MAX_FILES} files. Selected folder contains ${selectedFiles.length} files.`;
         if (isLabelled) {
@@ -241,7 +342,7 @@ const DatasetManager = () => {
         return;
       }
 
-      // Check file sizes immediately
+      // Check file sizes
       const oversizedFiles: string[] = [];
       for (const file of selectedFiles) {
         if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -270,7 +371,22 @@ const DatasetManager = () => {
       // All validations passed - process files
       const { files: validFiles } = buildFilesFromFileList(fileList);
 
+      // Extract folder name from first file's webkitRelativePath
+      let folderName = "Selected Folder";
+      if (validFiles.length > 0) {
+        // @ts-ignore webkitRelativePath available in supported browsers
+        const relPath = (validFiles[0] as any).webkitRelativePath || validFiles[0].name;
+        const pathParts = relPath.split('/').filter(Boolean);
+        if (pathParts.length > 1) {
+          folderName = pathParts[0]; // First directory is the folder name
+        } else {
+          folderName = validFiles[0].name; // Fallback to filename if no path
+        }
+      }
+
       setFiles(validFiles);
+      setSelectedFolderName(folderName);
+      setSelectedFolderType(isLabelled ? "labelled" : "unlabelled");
       setStatusMessage(`Selected ${validFiles.length} files.`);
       setUploadStatus("idle");
       setMetadata(null);
@@ -330,18 +446,56 @@ const DatasetManager = () => {
   }, [companyName, project]);
 
   // ------- File manifest pagination & fetch helpers -------
-  const fetchFileManifest = async (datasetId: string, page = 1, limit = 1000) => {
+  const fetchFileManifest = async (
+    datasetId: string, 
+    page = 1, 
+    limit = 1000,
+    folder?: string,
+    type?: string,
+    sort?: string,
+    order?: string
+  ) => {
     try {
       const headers = await getAuthHeaders();
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (folder) qs.append("folder", folder);
+      if (type && type !== "all") qs.append("type", type);
+      if (sort) qs.append("sort", sort);
+      if (order) qs.append("order", order);
       const url = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/files?${qs.toString()}`);
       const res = await fetch(url, { method: "GET", headers });
       if (!res.ok) {
         throw new Error(`files fetch failed ${res.status}`);
       }
       const json = await res.json();
-      const list: FileEntry[] = json.files || json.items || json;
-      return { list, meta: json };
+      // API returns: { files: [...], items: [...], totalFiles, total, totalPages, page, limit, datasetId }
+      // Handle both 'files' and 'items' response formats
+      const rawFiles = json.files || json.items || [];
+      // Map API response fields to FileEntry interface
+      const list: FileEntry[] = rawFiles.map((file: any) => ({
+        id: file.id || file.fileId,
+        storedName: file.storedName,
+        originalName: file.originalName || file.name || "",
+        type: file.type,
+        size: file.size,
+        folder: file.folder,
+        storedPath: file.storedPath || file.path || (file.folder ? `${file.folder}/${file.originalName || file.name}` : file.originalName || file.name || ""),
+        thumbnailAvailable: file.thumbnailAvailable,
+        url: file.url,
+        // Legacy fields for backward compatibility
+        name: file.originalName || file.name,
+        path: file.storedPath || file.path,
+        thumbUrl: file.thumbUrl,
+        mime: file.mime,
+      }));
+      return { 
+        list, 
+        meta: {
+          ...json,
+          totalFiles: json.totalFiles || json.total || 0,
+          totalPages: json.totalPages || Math.ceil((json.totalFiles || json.total || 0) / limit),
+        }
+      };
     } catch (err) {
       console.warn("fetchFileManifest error:", err);
       return { list: [] as FileEntry[], meta: null };
@@ -362,6 +516,114 @@ const DatasetManager = () => {
     return all;
   };
 
+  // ------- Lazy-load files for a specific folder -------
+  const fetchFolderFiles = async (datasetId: string, folderName: string, page = 1, reset = false) => {
+    if (reset) {
+      setFolderFiles([]);
+      setFolderFilesPage(1);
+    }
+    setFolderFilesLoading(true);
+    try {
+      const { list, meta } = await fetchFileManifest(
+        datasetId,
+        page,
+        50, // Smaller limit for folder view
+        folderName,
+        fileTypeFilter !== "all" ? fileTypeFilter : undefined,
+        fileSort,
+        fileSortOrder
+      );
+      if (reset) {
+        setFolderFiles(list);
+      } else {
+        setFolderFiles((prev) => [...prev, ...list]);
+      }
+      if (meta) {
+        setFolderFilesTotal(meta.totalFiles || 0);
+        setFolderFilesTotalPages(meta.totalPages || 1);
+      }
+      setFolderFilesPage(page);
+    } catch (err) {
+      console.warn("fetchFolderFiles error:", err);
+      toast({
+        title: "Error",
+        description: "Failed to load folder files.",
+        variant: "destructive",
+      });
+    } finally {
+      setFolderFilesLoading(false);
+    }
+  };
+
+  // ------- Load more files (pagination) -------
+  const loadMoreFolderFiles = () => {
+    const datasetId = selectedVersionDatasetId || currentDatasetId;
+    if (!datasetId || !selectedFolder) return;
+    if (folderFilesPage < folderFilesTotalPages) {
+      fetchFolderFiles(datasetId, selectedFolder, folderFilesPage + 1, false);
+    }
+  };
+
+  // ------- Handle folder selection -------
+  const handleFolderSelect = (folderName: string) => {
+    setSelectedFolder(folderName);
+    setViewMode("grid");
+    const datasetId = selectedVersionDatasetId || currentDatasetId;
+    if (datasetId) {
+      fetchFolderFiles(datasetId, folderName, 1, true);
+    }
+  };
+
+  // ------- Handle image click -------
+  const handleImageClick = async (file: FileEntry) => {
+    setSelectedImageFile(file);
+    // Find associated label file
+    const datasetId = selectedVersionDatasetId || currentDatasetId;
+    if (datasetId && file.type === "image") {
+      // Try to find label file in current folder files, or search in all files
+      const baseName = file.originalName.replace(/\.(jpg|jpeg|png)$/i, "");
+      let labelFile = folderFiles.find(
+        (f) => f.type === "label" && f.originalName === `${baseName}.txt`
+      );
+      
+      // If not found in folder files, search in fileManifest
+      if (!labelFile && fileManifest.length > 0) {
+        labelFile = fileManifest.find(
+          (f) => f.type === "label" && f.originalName === `${baseName}.txt` && f.folder === file.folder
+        );
+      }
+      
+      if (labelFile) {
+        setSelectedLabelFile(labelFile);
+        // Fetch label file content - try download endpoint first, then regular file endpoint
+        try {
+          const headers = await getAuthHeaders();
+          let url = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(labelFile.id)}/download`);
+          let res = await fetch(url, { method: "GET", headers });
+          
+          // If download endpoint doesn't exist, try regular file endpoint
+          if (!res.ok) {
+            url = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(labelFile.id)}`);
+            res = await fetch(url, { method: "GET", headers });
+          }
+          
+          if (res.ok) {
+            const text = await res.text();
+            setLabelFileContent(text);
+          } else {
+            setLabelFileContent(null);
+          }
+        } catch (err) {
+          console.warn("Failed to fetch label file:", err);
+          setLabelFileContent(null);
+        }
+      } else {
+        setSelectedLabelFile(null);
+        setLabelFileContent(null);
+      }
+    }
+  };
+
   const fetchFolderSummary = async (datasetId: string) => {
     try {
       const headers = await getAuthHeaders();
@@ -380,19 +642,24 @@ const DatasetManager = () => {
     const root: any = { type: "folder", name: "", children: [] };
 
     for (const f of filesList) {
-      const parts = (f.path || f.name).split("/").filter(Boolean);
+      // Use storedPath if available, otherwise construct from folder + originalName, fallback to legacy fields
+      const pathToUse = f.storedPath || (f.folder ? `${f.folder}/${f.originalName || f.name || ""}` : f.originalName || f.name || f.path || "");
+      const parts = pathToUse.split("/").filter(Boolean);
       let node = root;
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i];
         const isFile = i === parts.length - 1;
         if (isFile) {
+          const filePath = f.storedPath || (f.folder ? `${f.folder}/${f.originalName || f.name || ""}` : f.originalName || f.name || f.path || "");
           node.children.push({
             type: "file",
             name: part,
-            path: f.path,
+            path: filePath,
             fileId: f.id,
-            thumbUrl: f.thumbUrl,
+            thumbnailAvailable: f.thumbnailAvailable,
             url: f.url,
+            // Legacy field for backward compatibility
+            thumbUrl: f.thumbUrl,
           });
         } else {
           let child = node.children.find((c: any) => c.type === "folder" && c.name === part);
@@ -530,6 +797,15 @@ const DatasetManager = () => {
       return;
     }
 
+    if (!version.trim()) {
+      toast({
+        title: "Version required",
+        description: "Please enter a version name before uploading.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const projectName = displayProjectName;
     const company = companyName || "Unknown";
 
@@ -541,12 +817,31 @@ const DatasetManager = () => {
       const formData = new FormData();
       formData.append("company", company);
       formData.append("project", projectName);
-      if (version.trim()) formData.append("version", version.trim());
+      formData.append("version", version.trim());
 
       const {
         data: { session },
       } = await supabase.auth.getSession();
       const token = session?.access_token;
+
+      // Build fileMeta array: map each file's originalName to its folder
+      const fileMeta = files.map((file) => {
+        // @ts-ignore webkitRelativePath available in supported browsers
+        const relPath = (file as any).webkitRelativePath || file.name;
+        // Extract folder from path (full path including subfolders, or "dataset" as default)
+        const pathParts = relPath.split('/').filter(Boolean);
+        const folder = pathParts.length > 1 
+          ? pathParts.slice(0, -1).join('/')  // All directories except filename, joined with '/'
+          : 'dataset';
+        
+        return {
+          originalName: file.name,
+          folder: folder,
+        };
+      });
+
+      // Append fileMeta as JSON string to FormData
+      formData.append('fileMeta', JSON.stringify(fileMeta));
 
       // Append every file with its relative path (preserve folder hierarchy)
       files.forEach((file) => {
@@ -582,6 +877,16 @@ const DatasetManager = () => {
         title: "Upload queued",
         description: `Dataset ${datasetId} queued with ${json.totalImages} files.`,
       });
+
+      // Clear folder selection after successful upload
+      setFiles([]);
+      setSelectedFolderName(null);
+      setSelectedFolderType(null);
+      // Clear file inputs
+      const labelledInput = document.getElementById("labelled-folder-input") as HTMLInputElement | null;
+      const unlabelledInput = document.getElementById("unlabelled-folder-input") as HTMLInputElement | null;
+      if (labelledInput) labelledInput.value = "";
+      if (unlabelledInput) unlabelledInput.value = "";
 
       // refresh versions
       await fetchVersions();
@@ -622,7 +927,52 @@ const DatasetManager = () => {
   const onSelectVersion = async (datasetId: string) => {
     try {
       setSelectedVersionDatasetId(datasetId);
+      setSelectedFolder(null); // Reset folder selection
+      setViewMode("tree"); // Default to tree view
 
+      // Fetch full dataset metadata first (lightweight)
+      try {
+        const headers = await getAuthHeaders();
+        const metaUrl = apiUrl(`/dataset/${encodeURIComponent(datasetId)}`);
+        const metaRes = await fetch(metaUrl, { headers });
+        if (metaRes.ok) {
+          const metaJson = await metaRes.json();
+          setMetadata(metaJson);
+          // Build tree from metadata.files if available (faster than fetching all)
+          if (metaJson.files && Array.isArray(metaJson.files)) {
+            const filesList: FileEntry[] = metaJson.files.map((file: any) => ({
+              id: file.id || file._id,
+              storedName: file.storedName,
+              originalName: file.originalName || file.name || "",
+              type: file.type,
+              size: file.size,
+              folder: file.folder,
+              storedPath: file.storedPath || file.path || "",
+              thumbnailAvailable: file.thumbnailAvailable,
+              url: file.url,
+              name: file.originalName || file.name,
+              path: file.storedPath || file.path,
+            }));
+            setFileManifest(filesList);
+            setFolderTree(buildTreeFromFiles(filesList));
+            const previews = filesList.slice(0, 50).map((f) => ({
+              path: f.storedPath || f.path || (f.folder ? `${f.folder}/${f.originalName || f.name || ""}` : f.originalName || f.name || ""),
+              fileId: f.id,
+              thumbnailAvailable: f.thumbnailAvailable,
+              url: f.url,
+              thumbUrl: f.thumbUrl,
+            }));
+            setMetadata((prev) => {
+              if (!prev) return null;
+              return { ...prev, previews };
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch metadata for selected version:", err);
+      }
+
+      // Also try folder summary for folder counts
       try {
         const sum = await fetchFolderSummary(datasetId);
         if (sum) setMetadata((prev) => ({ ...(prev ?? {}), ...sum }));
@@ -630,19 +980,28 @@ const DatasetManager = () => {
         console.warn("fetchFolderSummary failed for version select:", err);
       }
 
-      try {
-        const allFiles = await fetchAllFiles(datasetId);
-        setFileManifest(allFiles || []);
-        setFolderTree(buildTreeFromFiles(allFiles || []));
-        const previews = (allFiles || []).slice(0, 50).map((f) => ({
-          path: f.path,
-          fileId: f.id,
-          thumbUrl: f.thumbUrl,
-          url: f.url,
-        }));
-        setMetadata((prev) => ({ ...(prev ?? {}), previews }));
-      } catch (err) {
-        console.warn("Failed to fetch files for selected version:", err);
+      // Fallback: if metadata.files not available, fetch all files (for tree view)
+      // Use a flag to track if we got files from metadata
+      const currentMetadata = metadata;
+      if (!currentMetadata?.files || !Array.isArray(currentMetadata.files) || currentMetadata.files.length === 0) {
+        try {
+          const allFiles = await fetchAllFiles(datasetId);
+          setFileManifest(allFiles || []);
+          setFolderTree(buildTreeFromFiles(allFiles || []));
+          const previews = (allFiles || []).slice(0, 50).map((f) => ({
+            path: f.storedPath || f.path || (f.folder ? `${f.folder}/${f.originalName || f.name || ""}` : f.originalName || f.name || ""),
+            fileId: f.id,
+            thumbnailAvailable: f.thumbnailAvailable,
+            url: f.url,
+            thumbUrl: f.thumbUrl,
+          }));
+          setMetadata((prev) => {
+            if (!prev) return null;
+            return { ...prev, previews };
+          });
+        } catch (err) {
+          console.warn("Failed to fetch files for selected version:", err);
+        }
       }
 
       // optionally fetch current status for that version to show progress
@@ -699,11 +1058,28 @@ const DatasetManager = () => {
     if (isFolder) {
       const children: any[] = node.children || [];
       const expanded = !!expandedPaths[path];
+      const folderName = node.name || "";
       return (
         <div className="pl-3">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleExpanded(path)}>
-            <span className="text-sm">{expanded ? "▾" : "▸"}</span>
-            <span className="font-medium text-sm">{node.name || "(root)"}</span>
+          <div className="flex items-center gap-2">
+            <span 
+              className="text-sm cursor-pointer" 
+              onClick={() => toggleExpanded(path)}
+            >
+              {expanded ? "▾" : "▸"}
+            </span>
+            <span 
+              className="font-medium text-sm cursor-pointer hover:text-primary"
+              onClick={() => {
+                if (folderName) {
+                  handleFolderSelect(folderName);
+                } else {
+                  toggleExpanded(path);
+                }
+              }}
+            >
+              {node.name || "(root)"}
+            </span>
           </div>
           {expanded && (
             <div className="pl-4">
@@ -718,28 +1094,58 @@ const DatasetManager = () => {
       );
     } else {
       const datasetId = selectedVersionDatasetId || currentDatasetId;
-      const thumbEndpoint = datasetId ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(node.fileId)}/thumbnail`) : null;
-      const fileEndpoint = datasetId ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(node.fileId)}`) : "#";
+      const thumbEndpoint = datasetId && node.thumbnailAvailable 
+        ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(node.fileId)}/thumbnail`) 
+        : null;
+      const fileEndpoint = datasetId 
+        ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(node.fileId)}`) 
+        : "#";
+
+      const fileEntry: FileEntry = {
+        id: node.fileId,
+        originalName: node.name,
+        storedPath: node.path,
+        folder: node.folder,
+        type: node.type || "image",
+        thumbnailAvailable: node.thumbnailAvailable,
+        url: node.url,
+      };
 
       return (
         <div className="pl-6 py-1 flex items-center gap-3 text-xs">
           {node.thumbUrl ? (
             <img src={node.thumbUrl} className="w-12 h-8 object-cover rounded" alt={node.name} />
-          ) : thumbEndpoint ? (
+          ) : node.thumbnailAvailable && thumbEndpoint ? (
             <img
               src={thumbEndpoint}
-              className="w-12 h-8 object-cover rounded"
+              className="w-12 h-8 object-cover rounded cursor-pointer"
               alt={node.name}
+              onClick={() => node.type === "image" && handleImageClick(fileEntry)}
               onError={async (e) => {
+                // Only try blob fetch if thumbnailAvailable was true
                 const objUrl = await fetchThumbnailAsObjectUrl(datasetId!, node.fileId);
                 if (objUrl) {
                   (e.target as HTMLImageElement).src = objUrl;
+                } else {
+                  // Hide image if thumbnail fetch fails
+                  (e.target as HTMLImageElement).style.display = 'none';
                 }
               }}
             />
           ) : null}
 
-          <a href={node.url || fileEndpoint} target="_blank" rel="noreferrer" className="break-words">
+          <a 
+            href={node.url || fileEndpoint} 
+            target="_blank" 
+            rel="noreferrer" 
+            className="break-words"
+            onClick={(e) => {
+              if (node.type === "image") {
+                e.preventDefault();
+                handleImageClick(fileEntry);
+              }
+            }}
+          >
             {node.name}
           </a>
         </div>
@@ -750,14 +1156,10 @@ const DatasetManager = () => {
   // ------- Render -------
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6">
         <div>
           <h2 className="text-2xl font-bold">Upload dataset for {displayProjectName}</h2>
           {companyName && <p className="text-sm text-muted-foreground">{companyName}</p>}
-        </div>
-        <div className="w-64">
-          <Label htmlFor="version" className="text-xs uppercase text-muted-foreground">Version (optional)</Label>
-          <Input id="version" placeholder="e.g. v1" value={version} onChange={(e) => setVersion(e.target.value)} />
         </div>
       </div>
 
@@ -768,22 +1170,39 @@ const DatasetManager = () => {
               <span>Labelled data</span>
               <span className="text-xs text-muted-foreground">{labelledOpen ? "▾" : "▸"}</span>
             </CardTitle>
-            <CardDescription>Upload folder — entire structure will be preserved.</CardDescription>
+            <CardDescription>Upload folder with both images and labels</CardDescription>
           </CardHeader>
           {labelledOpen && (
             <CardContent className="space-y-4">
               <div>
-                <Label className="text-sm">Select folder</Label>
-                <div className="mt-2 flex items-center gap-4">
-                  <Button type="button" variant="outline" onClick={() => { const input = document.getElementById("labelled-folder-input") as HTMLInputElement | null; input?.click(); }}>
-                    Select Folder
-                  </Button>
-                  <span className="text-xs text-muted-foreground">All files & subfolders preserved • Max {MAX_FILES} files</span>
-                </div>
-                {labelledFolderError && (
-                  <p className="mt-1 text-xs text-destructive" role="alert">
-                    {labelledFolderError}
-                  </p>
+                {selectedFolderType === "labelled" && selectedFolderName ? (
+                  <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
+                    <span className="text-sm font-medium flex-1">{selectedFolderName}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={handleDeselectFolder}
+                      aria-label="Deselect folder"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-4">
+                      <Button type="button" variant="outline" onClick={() => { const input = document.getElementById("labelled-folder-input") as HTMLInputElement | null; input?.click(); }}>
+                        Select Folder
+                      </Button>
+                      <span className="text-xs text-muted-foreground">All files & subfolders preserved • Max {MAX_FILES} files</span>
+                    </div>
+                    {labelledFolderError && (
+                      <p className="mt-1 text-xs text-destructive" role="alert">
+                        {labelledFolderError}
+                      </p>
+                    )}
+                  </>
                 )}
                 <input id="labelled-folder-input" type="file" multiple // @ts-ignore
                   webkitdirectory="true" className="hidden" onChange={(e) => handleFilesSelected(e.target.files, true)} />
@@ -798,22 +1217,39 @@ const DatasetManager = () => {
               <span>Unlabelled data</span>
               <span className="text-xs text-muted-foreground">{unlabelledOpen ? "▾" : "▸"}</span>
             </CardTitle>
-            <CardDescription>Upload entire folder structure (images only or mixed).</CardDescription>
+            <CardDescription>Upload folder with images only</CardDescription>
           </CardHeader>
           {unlabelledOpen && (
             <CardContent className="space-y-4">
               <div>
-                <Label className="text-sm">Select folder</Label>
-                <div className="mt-2 flex items-center gap-4">
-                  <Button type="button" variant="outline" onClick={() => { const input = document.getElementById("unlabelled-folder-input") as HTMLInputElement | null; input?.click(); }}>
-                    Select Folder
-                  </Button>
-                  <span className="text-xs text-muted-foreground">All files & subfolders preserved • Max {MAX_FILES} files</span>
-                </div>
-                {unlabelledFolderError && (
-                  <p className="mt-1 text-xs text-destructive" role="alert">
-                    {unlabelledFolderError}
-                  </p>
+                {selectedFolderType === "unlabelled" && selectedFolderName ? (
+                  <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
+                    <span className="text-sm font-medium flex-1">{selectedFolderName}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={handleDeselectFolder}
+                      aria-label="Deselect folder"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-4">
+                      <Button type="button" variant="outline" onClick={() => { const input = document.getElementById("unlabelled-folder-input") as HTMLInputElement | null; input?.click(); }}>
+                        Select Folder
+                      </Button>
+                      <span className="text-xs text-muted-foreground">All files & subfolders preserved • Max {MAX_FILES} files</span>
+                    </div>
+                    {unlabelledFolderError && (
+                      <p className="mt-1 text-xs text-destructive" role="alert">
+                        {unlabelledFolderError}
+                      </p>
+                    )}
+                  </>
                 )}
                 <input id="unlabelled-folder-input" type="file" multiple // @ts-ignore
                   webkitdirectory="true" className="hidden" onChange={(e) => handleFilesSelected(e.target.files, false)} />
@@ -825,9 +1261,27 @@ const DatasetManager = () => {
 
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
-          <Button onClick={handleUpload} disabled={uploadStatus === "uploading" || files.length === 0}>
-            {uploadStatus === "uploading" ? "Uploading..." : "Upload"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="w-48">
+              <Label htmlFor="version" className="text-xs uppercase text-muted-foreground">
+                Version <span className="text-destructive">*</span>
+              </Label>
+              <Input 
+                id="version" 
+                placeholder="e.g. v1" 
+                value={version} 
+                onChange={(e) => setVersion(e.target.value)}
+                className={version.trim() === "" ? "border-destructive" : ""}
+                required
+              />
+            </div>
+            <Button 
+              onClick={handleUpload} 
+              disabled={uploadStatus === "uploading" || files.length === 0 || version.trim() === ""}
+            >
+              {uploadStatus === "uploading" ? "Uploading..." : "Upload"}
+            </Button>
+          </div>
           <div className="text-sm">
             <span className="font-medium">Status: </span>
             <span>{statusMessage}</span>
@@ -880,25 +1334,28 @@ const DatasetManager = () => {
               <CardTitle>Dataset summary</CardTitle>
               <CardDescription>ID: {metadata.id}</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-1 text-sm">
-              {typeof metadata.totalImages === "number" && <p><span className="font-medium">Total files: </span>{metadata.totalImages}</p>}
-              {typeof metadata.sizeBytes === "number" && <p><span className="font-medium">Size: </span>{(metadata.sizeBytes / (1024 * 1024)).toFixed(2)} MB</p>}
-              {typeof metadata.thumbnailsGenerated === "boolean" && <p><span className="font-medium">Thumbnails: </span>{metadata.thumbnailsGenerated ? "Generated" : "Pending"}</p>}
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-1">
+                {typeof metadata.totalImages === "number" && <p><span className="font-medium">Total files: </span>{metadata.totalImages}</p>}
+                {typeof metadata.sizeBytes === "number" && <p><span className="font-medium">Size: </span>{(metadata.sizeBytes / (1024 * 1024)).toFixed(2)} MB</p>}
+                {typeof metadata.thumbnailsGenerated === "boolean" && <p><span className="font-medium">Thumbnails: </span>{metadata.thumbnailsGenerated ? "Generated" : "Pending"}</p>}
+              </div>
+              
+              {metadata.folders && Object.keys(metadata.folders).length > 0 && (
+                <div className="pt-3 border-t">
+                  <p className="font-medium mb-2">Folder breakdown:</p>
+                  <div className="space-y-1.5 pl-2">
+                    {Object.entries(metadata.folders).map(([folderName, stats]) => (
+                      <p key={folderName} className="text-xs">
+                        <span className="font-medium">{folderName}: </span>
+                        {stats.images} image{stats.images !== 1 ? 's' : ''}, {stats.labels} label{stats.labels !== 1 ? 's' : ''}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
-
-          {metadata.folders && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Folder breakdown</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {Object.entries(metadata.folders).map(([folderName, stats]) => (
-                  <p key={folderName}><span className="font-medium">{folderName}: </span>{stats.images} images, {stats.labels} labels</p>
-                ))}
-              </CardContent>
-            </Card>
-          )}
         </div>
       )}
 
@@ -932,16 +1389,198 @@ const DatasetManager = () => {
         </CardContent>
       </Card>
 
-      {/* Folder tree for selected version */}
-      {folderTree && (
-        <Card className="mt-4">
+      {/* File Browser - Tree or Grid View */}
+      {selectedVersionDatasetId && metadata && (
+        <Card className="mt-6">
           <CardHeader>
-            <CardTitle>Version contents</CardTitle>
-            <CardDescription>Browse full stored folder tree</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>File Browser</CardTitle>
+                <CardDescription>
+                  {selectedFolder ? `Viewing folder: ${selectedFolder}` : "Browse dataset files"}
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={viewMode === "tree" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("tree")}
+                >
+                  <List className="h-4 w-4 mr-2" />
+                  Tree
+                </Button>
+                <Button
+                  variant={viewMode === "grid" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("grid")}
+                >
+                  <Grid3x3 className="h-4 w-4 mr-2" />
+                  Grid
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-sm mb-3">Click folders to expand. Files link to their stored URLs or download endpoints.</div>
-            <div><TreeNode node={folderTree} /></div>
+            {viewMode === "tree" ? (
+              <div>
+                {folderTree ? (
+                  <TreeNode node={folderTree} />
+                ) : (
+                  <div className="text-sm text-muted-foreground">No files available</div>
+                )}
+              </div>
+            ) : (
+              <div>
+                {/* Filters and Sort Controls */}
+                <div className="mb-4 flex items-center gap-4 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs">Filter:</Label>
+                    <Select value={fileTypeFilter} onValueChange={(value: "all" | "image" | "label") => {
+                      setFileTypeFilter(value);
+                      const datasetId = selectedVersionDatasetId || currentDatasetId;
+                      if (datasetId && selectedFolder) {
+                        fetchFolderFiles(datasetId, selectedFolder, 1, true);
+                      }
+                    }}>
+                      <SelectTrigger className="w-32 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Files</SelectItem>
+                        <SelectItem value="image">Images</SelectItem>
+                        <SelectItem value="label">Labels</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs">Sort:</Label>
+                    <Select value={fileSort} onValueChange={(value: "name" | "size") => {
+                      setFileSort(value);
+                      const datasetId = selectedVersionDatasetId || currentDatasetId;
+                      if (datasetId && selectedFolder) {
+                        fetchFolderFiles(datasetId, selectedFolder, 1, true);
+                      }
+                    }}>
+                      <SelectTrigger className="w-32 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="name">Name</SelectItem>
+                        <SelectItem value="size">Size</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs">Order:</Label>
+                    <Select value={fileSortOrder} onValueChange={(value: "asc" | "desc") => {
+                      setFileSortOrder(value);
+                      const datasetId = selectedVersionDatasetId || currentDatasetId;
+                      if (datasetId && selectedFolder) {
+                        fetchFolderFiles(datasetId, selectedFolder, 1, true);
+                      }
+                    }}>
+                      <SelectTrigger className="w-24 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="asc">Ascending</SelectItem>
+                        <SelectItem value="desc">Descending</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {selectedFolder && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedFolder(null);
+                        setViewMode("tree");
+                      }}
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Clear Folder
+                    </Button>
+                  )}
+                </div>
+
+                {/* Grid View */}
+                {selectedFolder ? (
+                  <div>
+                    {folderFilesLoading && folderFiles.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-8 text-center">Loading files...</div>
+                    ) : folderFiles.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-8 text-center">No files in this folder</div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                          {folderFiles.map((file) => {
+                            const datasetId = selectedVersionDatasetId || currentDatasetId;
+                            const thumbEndpoint = datasetId && file.thumbnailAvailable
+                              ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(file.id)}/thumbnail`)
+                              : null;
+                            
+                            return (
+                              <div
+                                key={file.id}
+                                className="border rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                                onClick={() => file.type === "image" && handleImageClick(file)}
+                              >
+                                <div className="aspect-square bg-muted flex items-center justify-center relative">
+                                  {file.type === "image" ? (
+                                    thumbEndpoint ? (
+                                      <img
+                                        src={thumbEndpoint}
+                                        alt={file.originalName}
+                                        className="w-full h-full object-cover"
+                                        onError={async (e) => {
+                                          const objUrl = await fetchThumbnailAsObjectUrl(datasetId!, file.id);
+                                          if (objUrl) {
+                                            (e.target as HTMLImageElement).src = objUrl;
+                                          } else {
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                          }
+                                        }}
+                                      />
+                                    ) : (
+                                      <div className="text-xs text-muted-foreground text-center p-2">No thumbnail</div>
+                                    )
+                                  ) : (
+                                    <FileText className="h-8 w-8 text-muted-foreground" />
+                                  )}
+                                </div>
+                                <div className="p-2">
+                                  <div className="text-xs font-medium truncate" title={file.originalName}>
+                                    {file.originalName}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {file.size ? `${(file.size / 1024).toFixed(1)} KB` : ""}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {folderFilesPage < folderFilesTotalPages && (
+                          <div className="mt-4 text-center">
+                            <Button
+                              variant="outline"
+                              onClick={loadMoreFolderFiles}
+                              disabled={folderFilesLoading}
+                            >
+                              {folderFilesLoading ? "Loading..." : `Load More (${folderFilesTotal - folderFiles.length} remaining)`}
+                            </Button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground py-8 text-center">
+                    Select a folder from the tree view to browse files
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -963,6 +1602,99 @@ const DatasetManager = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Image Viewer Modal */}
+      <Dialog open={!!selectedImageFile} onOpenChange={(open) => {
+        if (!open) {
+          setSelectedImageFile(null);
+          setSelectedLabelFile(null);
+          setLabelFileContent(null);
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>{selectedImageFile?.originalName}</DialogTitle>
+            <DialogDescription>
+              {selectedImageFile?.folder && `Folder: ${selectedImageFile.folder}`}
+              {selectedImageFile?.size && ` • Size: ${(selectedImageFile.size / 1024).toFixed(1)} KB`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Full-size Image */}
+            {selectedImageFile && (() => {
+              const datasetId = selectedVersionDatasetId || currentDatasetId || "";
+              // Try download endpoint first, fallback to regular file endpoint, then thumbnail
+              const imageUrl = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(selectedImageFile.id)}/download`);
+              const fallbackUrl = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(selectedImageFile.id)}`);
+              const thumbnailUrl = selectedImageFile.thumbnailAvailable 
+                ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(selectedImageFile.id)}/thumbnail`)
+                : null;
+              
+              return (
+                <div className="flex justify-center">
+                  <img
+                    src={imageUrl}
+                    alt={selectedImageFile.originalName}
+                    className="max-w-full max-h-[60vh] object-contain"
+                    onError={(e) => {
+                      // Try fallback URL
+                      if ((e.target as HTMLImageElement).src !== fallbackUrl) {
+                        (e.target as HTMLImageElement).src = fallbackUrl;
+                      } else if (thumbnailUrl) {
+                        // Last resort: use thumbnail
+                        (e.target as HTMLImageElement).src = thumbnailUrl;
+                      } else {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }
+                    }}
+                  />
+                </div>
+              );
+            })()}
+            
+            {/* Label File Content */}
+            {selectedLabelFile && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">Associated Label File: {selectedLabelFile.originalName}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {labelFileContent ? (
+                    <pre className="text-xs bg-muted p-4 rounded overflow-auto max-h-48">
+                      {labelFileContent}
+                    </pre>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">Loading label file...</div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              {selectedImageFile && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const datasetId = selectedVersionDatasetId || currentDatasetId;
+                    if (datasetId) {
+                      // Try download endpoint, fallback to regular file endpoint
+                      const downloadUrl = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(selectedImageFile.id)}/download`);
+                      const fileUrl = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(selectedImageFile.id)}`);
+                      // Try download first, if it fails the browser will handle it
+                      window.open(downloadUrl, '_blank');
+                    }
+                  }}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

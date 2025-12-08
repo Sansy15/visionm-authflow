@@ -132,6 +132,28 @@ export function useFormValidation<T extends z.ZodTypeAny>({
     [touched]
   );
 
+  // Set error for a specific field (for programmatic error setting)
+  const setFieldError = useCallback(
+    (field: keyof z.infer<T>, error: string) => {
+      setErrors((prev) => ({
+        ...prev,
+        [field as string]: error,
+      }));
+    },
+    []
+  );
+
+  // Set touched state for a specific field (for programmatic touch setting)
+  const setFieldTouched = useCallback(
+    (field: keyof z.infer<T>, touchedValue: boolean = true) => {
+      setTouched((prev) => ({
+        ...prev,
+        [field as string]: touchedValue,
+      }));
+    },
+    []
+  );
+
   return {
     values,
     errors,
@@ -144,6 +166,8 @@ export function useFormValidation<T extends z.ZodTypeAny>({
     resetForm,
     getFieldError,
     isFieldTouched,
+    setFieldError,
+    setFieldTouched,
   };
 }
 

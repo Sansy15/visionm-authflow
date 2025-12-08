@@ -36,3 +36,4 @@ ON public.workspace_join_requests
 FOR INSERT
 WITH CHECK (user_id = auth.uid());
 
+

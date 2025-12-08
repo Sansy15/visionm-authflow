@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { FormFieldWrapper } from "@/components/FormFieldWrapper";
 import { PasswordChecklist } from "@/components/PasswordChecklist";
+import { PasswordInput } from "@/components/PasswordInput";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import {
   signupSchema,
@@ -89,59 +90,68 @@ const Auth = () => {
   }, [inviteToken]);
 
   // Auto-trigger signInWithOtp if invite token present and no session
-  useEffect(() => {
-    if (!inviteToken) return;
 
-    const checkSessionAndTriggerOtp = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+useEffect(() => {
+  if (!inviteToken) return;
 
-      // If no session and invite token exists, validate invite and trigger OTP
-      if (!session) {
-        try {
-          // Validate invite to get email
-          const validateRes = await fetch(
-            `/functions/v1/validate-invite?token=${encodeURIComponent(inviteToken)}`
-          );
-          const validateJson = await validateRes.json();
+  const checkSessionAndTriggerOtp = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-          if (validateRes.ok && validateJson?.ok && validateJson.invite?.email) {
-            const inviteEmail = validateJson.invite.email;
-            // Prefill email in signin form
-            signinForm.setValue("email", inviteEmail);
-            // Trigger signInWithOtp automatically
-            const { error: otpError } = await supabase.auth.signInWithOtp({
-              email: inviteEmail,
-              options: {
-                emailRedirectTo: `${normalizeUrl(window.location.origin)}/auth?invite=${encodeURIComponent(inviteToken)}`,
-              },
+    // If no session and invite token exists, validate invite and trigger OTP
+    if (!session) {
+      try {
+        // Validate invite to get email
+        const { data: validateJson, error: validateError } = await supabase.functions.invoke("validate-invite", {
+          body: { token: inviteToken },
+        });
+
+        // validate-invite returns invite.invite_email
+        const inviteEmail =
+          !validateError && validateJson?.ok
+            ? validateJson.invite?.invite_email ?? validateJson.invite?.email
+            : null;
+
+        if (inviteEmail) {
+          // Prefill email in signin form
+          signinForm.setValue("email", inviteEmail);
+
+          // Trigger signInWithOtp automatically
+          const { error: otpError } = await supabase.auth.signInWithOtp({
+            email: inviteEmail,
+            options: {
+              emailRedirectTo: `${normalizeUrl(
+                window.location.origin
+              )}/auth?invite=${encodeURIComponent(inviteToken)}`,
+            },
+          });
+
+          if (otpError) {
+            console.error("Auto OTP trigger error:", otpError);
+            // Don't show error - user can still sign in manually
+          } else {
+            toast({
+              title: "Magic link sent",
+              description: `A sign-in link has been sent to ${inviteEmail}. Check your email and click the link to sign in and accept the invite.`,
             });
-
-            if (otpError) {
-              console.error("Auto OTP trigger error:", otpError);
-              // Don't show error - user can still sign in manually
-            } else {
-              toast({
-                title: "Magic link sent",
-                description: `A sign-in link has been sent to ${inviteEmail}. Check your email and click the link to sign in and accept the invite.`,
-              });
-            }
           }
-        } catch (error) {
-          console.error("Error validating invite for auto OTP:", error);
-          // Don't block user - they can still sign in manually
         }
-      } else {
-        // Session exists - check if we need to accept invite
-        // This handles the case where user clicked magic link and is already signed in
-        handleInviteAcceptanceAfterSignIn();
+      } catch (error) {
+        console.error("Error validating invite for auto OTP:", error);
+        // Don't block user - they can still sign in manually
       }
-    };
+    } else {
+      // Session exists - check if we need to accept invite
+      // This handles the case where user clicked magic link and is already signed in
+      handleInviteAcceptanceAfterSignIn();
+    }
+  };
 
-    checkSessionAndTriggerOtp();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inviteToken]);
+  checkSessionAndTriggerOtp();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [inviteToken]);
+
 
   // Check for pending invite from user metadata (when user confirms via Supabase email)
   const checkForPendingInviteFromMetadata = async (user: any) => {
@@ -156,14 +166,11 @@ const Auth = () => {
       const inviteTokenFromMetadata = user.user_metadata.invite_token;
       
       // Accept the invite using token from metadata
-      const acceptRes = await fetch("/functions/v1/accept-invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: inviteTokenFromMetadata, userId: user.id }),
+      const { data: acceptJson, error: acceptError } = await supabase.functions.invoke("accept-invite", {
+        body: { token: inviteTokenFromMetadata, userId: user.id },
       });
       
-      const acceptJson = await acceptRes.json();
-      if (acceptRes.ok && acceptJson?.ok) {
+      if (!acceptError && acceptJson?.ok) {
         toast({
           title: "Invite accepted",
           description: "You have been added to the company. Redirecting to dashboard...",
@@ -180,75 +187,78 @@ const Auth = () => {
   };
 
   // Handle invite acceptance after sign-in (for magic link flow)
-  const handleInviteAcceptanceAfterSignIn = async () => {
-    if (!inviteToken) return;
+ const handleInviteAcceptanceAfterSignIn = async () => {
+  if (!inviteToken) return;
 
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-      if (!session?.user) return;
+    if (!session?.user) return;
 
-      // Validate invite
-      const validateRes = await fetch(
-        `/functions/v1/validate-invite?token=${encodeURIComponent(inviteToken)}`
-      );
-      const validateJson = await validateRes.json();
+    // Validate invite
+    const validateRes = await fetch(
+      `/functions/v1/validate-invite?token=${encodeURIComponent(inviteToken)}`
+    );
+    const validateJson = await validateRes.json();
 
-      if (!validateRes.ok || !validateJson?.ok) {
-        return;
-      }
+    if (!validateRes.ok || !validateJson?.ok) {
+      return;
+    }
 
-      const invite = validateJson.invite;
-      if (!invite || invite.status !== "pending") {
-        return;
-      }
+    const invite = validateJson.invite;
+    if (!invite) {
+      return;
+    }
 
-      // Check if user's email matches invite email
-      if (session.user.email !== invite.email) {
-        toast({
-          title: "Invite email mismatch",
-          description: "This invite is for a different email address.",
-          variant: "destructive",
-        });
-        return;
-      }
+    // validate-invite returns invite.invite_email
+    const inviteEmail = invite.invite_email ?? invite.email;
 
-      // Accept the invite
-      const acceptRes = await fetch("/functions/v1/accept-invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: inviteToken, userId: session.user.id }),
+    // Check if user's email matches invite email
+    if (inviteEmail && session.user.email !== inviteEmail) {
+      toast({
+        title: "Invite email mismatch",
+        description: "This invite is for a different email address.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Accept the invite
+    const { data: acceptJson, error: acceptError } = await supabase.functions.invoke("accept-invite", {
+      body: { token: inviteToken, userId: session.user.id },
+    });
+
+    if (!acceptError && acceptJson?.ok) {
+      toast({
+        title: "Invite accepted",
+        description: "You have been added to the company. Redirecting to dashboard...",
       });
 
-      const acceptJson = await acceptRes.json();
-      if (acceptRes.ok && acceptJson?.ok) {
-        toast({
-          title: "Invite accepted",
-          description: "You have been added to the company. Redirecting to dashboard...",
-        });
-        // Clear invite token from URL
-        const newParams = new URLSearchParams(searchParams);
-        newParams.delete("invite");
-        newParams.delete("project_invite");
-        setSearchParams(newParams);
-        // Wait a moment for profile to update, then redirect to dashboard
-        setTimeout(() => {
-          navigate("/dashboard");
-        }, 1500);
-      } else {
-        console.error("Invite acceptance failed:", acceptJson?.error);
-        toast({
-          title: "Failed to accept invite",
-          description: acceptJson?.error || "Please try again.",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      console.error("Error accepting invite after sign-in:", error);
+      // Clear invite token from URL
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete("invite");
+      newParams.delete("project_invite");
+      setSearchParams(newParams);
+
+      // Wait a moment for profile to update, then redirect to dashboard
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 1500);
+    } else {
+      console.error("Invite acceptance failed:", acceptJson?.error);
+      toast({
+        title: "Failed to accept invite",
+        description: acceptJson?.error || "Please try again.",
+        variant: "destructive",
+      });
     }
-  };
+  } catch (error) {
+    console.error("Error accepting invite after sign-in:", error);
+  }
+};
+
 
   // Reset forms and phone error when switching modes
   useEffect(() => {
@@ -500,13 +510,10 @@ const Auth = () => {
       // Handle invite acceptance if token is present
       if (inviteToken && data.user) {
         try {
-          const acceptRes = await fetch("/functions/v1/accept-invite", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: inviteToken, userId: data.user.id }),
+          const { data: acceptJson, error: acceptError } = await supabase.functions.invoke("accept-invite", {
+            body: { token: inviteToken, userId: data.user.id },
           });
-          const acceptJson = await acceptRes.json();
-          if (acceptRes.ok && acceptJson?.ok) {
+          if (!acceptError && acceptJson?.ok) {
             toast({
               title: "Invite accepted",
               description: "You have been added to the company.",
@@ -550,7 +557,37 @@ const Auth = () => {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(resetPasswordForm.values.email, {
+      const email = resetPasswordForm.values.email.trim();
+
+      // Step 1: Check if email exists in Auth database
+      const { data: emailCheckData, error: emailCheckError } = await supabase.functions.invoke(
+        "check-email-exists",
+        {
+          body: { email },
+        }
+      );
+
+      if (emailCheckError) {
+        throw new Error("Failed to verify email. Please try again.");
+      }
+
+      // Step 2: If email doesn't exist, show error and stop
+      if (!emailCheckData?.exists) {
+        // Set inline field error
+        resetPasswordForm.setFieldError("email", "This email is not registered");
+        resetPasswordForm.setFieldTouched("email", true);
+        
+        toast({
+          title: "Email not found",
+          description: "This email is not registered. Please check and try again.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Step 3: Email exists - proceed with password reset
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${normalizeUrl(window.location.origin)}/reset-password`,
       });
 
@@ -563,11 +600,17 @@ const Auth = () => {
 
       setMode("signin");
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Something went wrong",
-        variant: "destructive",
-      });
+      // Handle errors from resetPasswordForEmail or other issues
+      const errorMessage = error.message || "Something went wrong";
+      
+      // Don't show duplicate error if we already showed "email not found"
+      if (!errorMessage.includes("not registered")) {
+        toast({
+          title: "Error",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -666,9 +709,8 @@ const Auth = () => {
 
               <div>
                 <Label htmlFor="password">Password</Label>
-                <Input
+                <PasswordInput
                   id="password"
-                  type="password"
                   value={signupForm.values.password}
                   onChange={signupForm.handleChange("password")}
                   onBlur={signupForm.handleBlur("password")}

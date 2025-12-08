@@ -6,7 +6,7 @@ import { Bell, Building2, Menu } from "lucide-react";
 import { UserMenu } from "./UserMenu";
 import { JoinCompanyDialog } from "@/components/JoinCompanyDialog";
 import { JoinRequestsSidePanel } from "@/components/JoinRequestsSidePanel";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { AppSidebar } from "./AppSidebar";

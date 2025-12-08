@@ -8,6 +8,7 @@ interface CompanyMembersProps {
   companyId: string;
   company: any;
   isAdmin: boolean;
+  refreshTrigger?: number; // Optional trigger to force refresh
 }
 
 interface MemberProfile {
@@ -17,12 +18,14 @@ interface MemberProfile {
   phone: string;
   created_at: string;
   company_id: string;
+  role?: string;
 }
 
 export const CompanyMembers: React.FC<CompanyMembersProps> = ({
   companyId,
   company,
   isAdmin,
+  refreshTrigger,
 }) => {
   const [members, setMembers] = useState<MemberProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,24 +37,29 @@ export const CompanyMembers: React.FC<CompanyMembersProps> = ({
       return;
     }
     fetchMembers();
-  }, [companyId, isAdmin]);
+  }, [companyId, isAdmin, refreshTrigger]);
 
   const fetchMembers = async () => {
     try {
       setLoading(true);
       setError(null);
 
+      console.log("[CompanyMembers] Fetching members for company:", companyId);
       const { data, error: fetchError } = await supabase
         .from("profiles")
-        .select("id, name, email, phone, created_at, company_id")
+        .select("id, name, email, phone, created_at, company_id, role")
         .eq("company_id", companyId)
         .order("created_at", { ascending: false });
 
-      if (fetchError) throw fetchError;
+      if (fetchError) {
+        console.error("[CompanyMembers] Fetch error:", fetchError);
+        throw fetchError;
+      }
 
+      console.log("[CompanyMembers] Fetched members:", data?.length || 0, data);
       setMembers(data || []);
     } catch (err: any) {
-      console.error("Error fetching company members:", err);
+      console.error("[CompanyMembers] Error fetching company members:", err);
       setError(err?.message || "Failed to load company members");
     } finally {
       setLoading(false);
@@ -79,6 +87,11 @@ export const CompanyMembers: React.FC<CompanyMembersProps> = ({
   };
 
   const getMemberRole = (member: MemberProfile) => {
+    // Check role field first (primary check)
+    if (member.role === 'admin') {
+      return "Admin";
+    }
+    // Fallback to email-based check (backward compatibility)
     if (company && member.email === company.admin_email) {
       return "Admin";
     }

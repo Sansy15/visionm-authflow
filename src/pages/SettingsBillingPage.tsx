@@ -1,5 +1,5 @@
 import React from "react";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { LoadingState } from "@/components/pages/LoadingState";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,10 +8,14 @@ import { Button } from "@/components/ui/button";
 import { CreditCard, Check } from "lucide-react";
 
 export const SettingsBillingPage: React.FC = () => {
-  const { profile, loading } = useProfile();
+  const { sessionReady, user, profile, loading } = useProfile();
 
-  if (loading) {
+  if (!sessionReady || loading) {
     return <LoadingState message="Loading billing information..." />;
+  }
+
+  if (sessionReady && !user) {
+    return null; // Will be redirected by ProtectedRoutes
   }
 
   // Placeholder data - replace with actual billing data when backend is ready
@@ -136,4 +140,5 @@ export const SettingsBillingPage: React.FC = () => {
     </div>
   );
 };
+
 

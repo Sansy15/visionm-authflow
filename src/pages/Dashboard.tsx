@@ -25,7 +25,7 @@ import {
   type CompanyDetailsFormData,
   type ProjectFormData,
 } from "@/lib/validations/authSchemas";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { EmptyState } from "@/components/pages/EmptyState";
 import { LoadingState } from "@/components/pages/LoadingState";
@@ -37,7 +37,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
-  const { profile, user, isAdmin: contextIsAdmin, company, reloadProfile, loading: profileLoading } = useProfile();
+  const { sessionReady, profile, user, isAdmin: contextIsAdmin, company, reloadProfile, loading: profileLoading } = useProfile();
 
   const [projects, setProjects] = useState<any[]>([]);
   const [showCompanyDialog, setShowCompanyDialog] = useState(false);
@@ -55,7 +55,7 @@ const Dashboard = () => {
       businessEmail: "",
     },
     validateOnChange: false,
-    validateOnBlur: true,
+    validateOnBlur: true, // Validate on blur for better UX
   });
 
   // Project Form Validation
@@ -75,14 +75,15 @@ const Dashboard = () => {
   // Auth check is handled by ProfileContext and AppShell
   // No need for redundant checks here
 
-  // Handle invite token from URL
+  // Handle invite token from URL (only after session is ready)
   useEffect(() => {
+    if (!sessionReady) return;
     const inviteToken = searchParams.get("invite") ?? searchParams.get("project_invite");
     if (inviteToken && user && !profileLoading) {
       handleInviteAcceptance(inviteToken);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, searchParams, profileLoading]);
+  }, [sessionReady, user, searchParams, profileLoading]);
 
   // Handle join request approve/reject from email links
   const handleJoinRequestFromEmail = async (token: string, action: string) => {
@@ -100,26 +101,12 @@ const Dashboard = () => {
         ? "approve-workspace-request" 
         : "reject-workspace-request";
       
-      const response = await fetch(`/functions/v1/${functionName}?token=${encodeURIComponent(token)}`, {
-        headers: {
-          "Accept": "application/json",
-          "Content-Type": "application/json",
-        },
+      const { data: result, error } = await supabase.functions.invoke(functionName, {
+        body: { token },
       });
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || `Failed to ${action} request`);
-      }
-
-      // Try to parse as JSON first, fallback to text
-      let result;
-      const contentType = response.headers.get("content-type");
-      if (contentType?.includes("application/json")) {
-        result = await response.json();
-      } else {
-        // If HTML response, consider it success (for direct browser access)
-        result = { success: true };
+      if (error) {
+        throw new Error(error.message || `Failed to ${action} request`);
       }
 
       toast({
@@ -187,10 +174,11 @@ const Dashboard = () => {
 
     try {
       // Validate invite first
-      const validateRes = await fetch(`/functions/v1/validate-invite?token=${encodeURIComponent(inviteToken)}`);
-      const validateJson = await validateRes.json();
+      const { data: validateJson, error: validateError } = await supabase.functions.invoke("validate-invite", {
+        body: { token: inviteToken },
+      });
 
-      if (!validateRes.ok || !validateJson?.ok) {
+      if (validateError || !validateJson?.ok) {
         // Invalid invite - clear token and continue normal flow
         const newParams = new URLSearchParams(searchParams);
         newParams.delete("invite");
@@ -216,14 +204,11 @@ const Dashboard = () => {
       }
 
       // Accept the invite
-      const acceptRes = await fetch("/functions/v1/accept-invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: inviteToken, userId: user.id }),
+      const { data: acceptJson, error: acceptError } = await supabase.functions.invoke("accept-invite", {
+        body: { token: inviteToken, userId: user.id },
       });
 
-      const acceptJson = await acceptRes.json();
-      if (acceptRes.ok && acceptJson?.ok) {
+      if (!acceptError && acceptJson?.ok) {
         toast({
           title: "Invite accepted",
           description: "You have been added to the company.",
@@ -252,9 +237,11 @@ const Dashboard = () => {
     if (!inviteToken) return false;
 
     try {
-      const res = await fetch(`/functions/v1/validate-invite?token=${encodeURIComponent(inviteToken)}`);
-      const json = await res.json();
-      if (res.ok && json?.ok && json.invite?.status === "pending") {
+      const { data: json, error } = await supabase.functions.invoke("validate-invite", {
+        body: { token: inviteToken },
+      });
+      
+      if (!error && json?.ok && json.invite?.status === "pending") {
         // Check if email matches
         const userEmail = user?.email;
         return userEmail === json.invite.email;
@@ -265,13 +252,20 @@ const Dashboard = () => {
     return false;
   };
 
-  // Load projects when profile/company changes (optimized: don't wait for profileLoading to be false)
+  // Load projects when profile/company changes (only after session is ready and user exists)
   useEffect(() => {
-    if (profile?.company_id) {
+    // Early return if session not ready
+    if (!sessionReady) return;
+
+    // Don't load if no user
+    if (sessionReady && !user) return;
+
+    // Load projects only when session ready, user exists, and profile has company_id
+    if (sessionReady && user && profile?.company_id) {
       // Load projects as soon as company_id is available (parallel with other operations)
       loadProjects(profile.company_id);
     }
-  }, [profile?.company_id]);
+  }, [sessionReady, user?.id, profile?.company_id]);
 
   // Show company dialog if user has no company and no valid invite
   useEffect(() => {
@@ -307,13 +301,22 @@ const Dashboard = () => {
   }, [contextIsAdmin, profile?.company_id, navigate]);
 
   const loadProjects = async (companyId: string) => {
-    const { data } = await supabase
-      .from("projects")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false });
 
-    if (data) setProjects(data);
+      if (error) {
+        console.error("Error loading projects:", error);
+        return;
+      }
+
+      if (data) setProjects(data);
+    } catch (error) {
+      console.error("Error loading projects:", error);
+    }
   };
 
 
@@ -338,20 +341,66 @@ const Dashboard = () => {
 
     setLoading(true);
 
-    const companyName = companyForm.values.companyName;
+    // Trim and normalize company name for comparison (case-insensitive, no whitespace)
+    const companyName = companyForm.values.companyName.trim();
     const businessEmail = companyForm.values.businessEmail;
 
     try {
-      // Check if company already exists
-      const { data: existingCompany, error: checkError } = await supabase
-        .from("companies")
-        .select("*")
-        .eq("name", companyName)
-        .maybeSingle();
+      // Check if company already exists using the SECURITY DEFINER function
+      // This bypasses RLS to allow existence checks even if user is not a member
+      let existingCompany = null;
+      
+      try {
+        const { data: existingCompanyData, error: checkError } = await supabase
+          .rpc("check_company_exists", { company_name: companyName });
 
-      if (checkError) {
-        console.error("Error checking existing company:", checkError);
-        // Continue with creation attempt even if check fails
+        if (checkError) {
+          // If RPC function doesn't exist or fails, try direct query as fallback
+          // This handles the case where migration hasn't been applied yet
+          console.warn("RPC check_company_exists failed, trying direct query:", checkError);
+          
+          // Fallback: Try direct query (will work if user is admin/member, but may fail due to RLS)
+          // Use case-insensitive comparison with ilike for fallback
+          // Note: This may still fail due to RLS if user is not a member, but we try anyway
+          const { data: directQueryData, error: directError } = await supabase
+            .from("companies")
+            .select("id, name, admin_email")
+            .ilike("name", companyName.trim())
+            .maybeSingle();
+          
+          if (!directError && directQueryData) {
+            existingCompany = directQueryData;
+          } else {
+            // If both fail, log error but don't proceed with creation
+            // This prevents creating duplicate companies
+            console.error("Both RPC and direct query failed to check company existence:", {
+              rpcError: checkError,
+              directError: directError
+            });
+            setLoading(false);
+            toast({
+              title: "Error",
+              description: "Unable to verify if company exists. Please try again or contact support.",
+              variant: "destructive",
+            });
+            return;
+          }
+        } else {
+          // RPC function succeeded, get the first result
+          existingCompany = existingCompanyData && existingCompanyData.length > 0 
+            ? existingCompanyData[0] 
+            : null;
+        }
+      } catch (rpcException: any) {
+        // Catch any unexpected errors in the RPC call
+        console.error("Exception checking company existence:", rpcException);
+        setLoading(false);
+        toast({
+          title: "Error",
+          description: "Failed to check if company exists. Please try again.",
+          variant: "destructive",
+        });
+        return;
       }
 
       if (existingCompany) {
@@ -585,14 +634,22 @@ const Dashboard = () => {
 
     setJoinRequestLoading(true);
     try {
-      const companyName = companyForm.values.companyName;
+      // Trim and normalize company name for comparison
+      const companyName = companyForm.values.companyName.trim();
       
-      // Get the existing company to get the actual admin_email
-      const { data: existingCompany } = await supabase
-        .from("companies")
-        .select("admin_email")
-        .eq("name", companyName)
-        .maybeSingle();
+      // Get the existing company to get the actual admin_email using the SECURITY DEFINER function
+      // This bypasses RLS to allow fetching admin_email even if user is not a member
+      const { data: existingCompanyData, error: fetchError } = await supabase
+        .rpc("check_company_exists", { company_name: companyName });
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      // The RPC function returns an array, get the first result
+      const existingCompany = existingCompanyData && existingCompanyData.length > 0 
+        ? existingCompanyData[0] 
+        : null;
 
       if (!existingCompany) {
         throw new Error("Company not found");
@@ -664,14 +721,29 @@ const Dashboard = () => {
 
     setJoinRequestLoading(true);
     try {
-      const companyName = companyForm.values.companyName;
+      // Trim and normalize company name for comparison
+      const companyName = companyForm.values.companyName.trim();
       
-      // Check if company exists by name
-      const { data: existingCompany } = await supabase
-        .from("companies")
-        .select("admin_email")
-        .eq("name", companyName)
-        .maybeSingle();
+      // Check if company exists by name using the SECURITY DEFINER function
+      // This bypasses RLS to allow existence checks even if user is not a member
+      const { data: existingCompanyData, error: fetchError } = await supabase
+        .rpc("check_company_exists", { company_name: companyName });
+
+      if (fetchError) {
+        console.error("Error checking company existence:", fetchError);
+        toast({
+          title: "Error",
+          description: "Failed to check if company exists. Please try again.",
+          variant: "destructive",
+        });
+        setJoinRequestLoading(false);
+        return;
+      }
+
+      // The RPC function returns an array, get the first result
+      const existingCompany = existingCompanyData && existingCompanyData.length > 0 
+        ? existingCompanyData[0] 
+        : null;
 
       if (!existingCompany) {
         toast({
@@ -767,7 +839,20 @@ const Dashboard = () => {
         throw projectError || new Error("Failed to create project");
       }
 
-      loadProjects(profile.company_id);
+      // Immediately add the new project to the state so it appears in "Manage Projects" without reload
+      setProjects((prevProjects) => {
+        // Check if project already exists to avoid duplicates
+        const exists = prevProjects.some((p) => p.id === project.id);
+        if (exists) return prevProjects;
+        return [project, ...prevProjects];
+      });
+
+      // Refresh the projects list in the background to ensure we have the latest data
+      // Don't await this since we're navigating away - it will complete in the background
+      loadProjects(profile.company_id).catch((error) => {
+        console.error("Error refreshing projects list:", error);
+        // Don't show error to user since we already added the project optimistically
+      });
 
       setShowProjectDialog(false);
       projectForm.resetForm();

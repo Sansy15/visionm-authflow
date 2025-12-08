@@ -90,11 +90,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // Set company_id on user's profile
+    // Set company_id and role='member' on user's profile
+    // Users who accept invites are members, not admins
     const { error: profileUpdateErr } = await supabase
       .from("profiles")
       .update({
         company_id: invite.company_id,
+        role: 'member',
       })
       .eq("id", userId);
 

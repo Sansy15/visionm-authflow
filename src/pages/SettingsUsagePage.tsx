@@ -1,5 +1,5 @@
 import React from "react";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { LoadingState } from "@/components/pages/LoadingState";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,10 +7,14 @@ import { Progress } from "@/components/ui/progress";
 import { BarChart3 } from "lucide-react";
 
 export const SettingsUsagePage: React.FC = () => {
-  const { profile, loading } = useProfile();
+  const { sessionReady, user, profile, loading } = useProfile();
 
-  if (loading) {
+  if (!sessionReady || loading) {
     return <LoadingState message="Loading usage information..." />;
+  }
+
+  if (sessionReady && !user) {
+    return null; // Will be redirected by ProtectedRoutes
   }
 
   // Placeholder data - replace with actual usage data when backend is ready
@@ -81,4 +85,5 @@ export const SettingsUsagePage: React.FC = () => {
     </div>
   );
 };
+
 

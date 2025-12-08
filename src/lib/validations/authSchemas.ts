@@ -132,8 +132,22 @@ export const validatePhoneNumber = (phone: string, countryCode: string): string 
 export const companyNameSchema = z
   .string()
   .min(1, "Company name is required")
-  .min(2, "Company name must be at least 2 characters")
-  .max(100, "Company name must be at most 100 characters");
+  .refine(
+    (val) => val.trim().length >= 2,
+    "Company name must be at least 2 characters"
+  )
+  .refine(
+    (val) => val.trim().length <= 100,
+    "Company name must be at most 100 characters"
+  )
+  .refine(
+    (val) => val.trim().length > 0,
+    "Company name cannot be only whitespace"
+  )
+  .refine(
+    (val) => /^[a-zA-Z0-9\s\-_&.,()]+$/.test(val.trim()),
+    "Company name can only contain letters, numbers, spaces, and common business characters (-, _, &, ., ,, (, ))"
+  );
 
 // Company Details Schema
 export const companyDetailsSchema = z.object({

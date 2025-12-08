@@ -15,3 +15,4 @@ CREATE POLICY "Company members can update projects in their company"
     )
   );
 
+

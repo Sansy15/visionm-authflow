@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,10 +9,14 @@ import { LoadingState } from "@/components/pages/LoadingState";
 
 export const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { profile, loading } = useProfile();
+  const { sessionReady, user, profile, loading } = useProfile();
 
-  if (loading) {
+  if (!sessionReady || loading) {
     return <LoadingState message="Loading settings..." />;
+  }
+
+  if (sessionReady && !user) {
+    return null; // Will be redirected by ProtectedRoutes
   }
 
   if (!profile?.company_id) {
@@ -86,4 +90,5 @@ export const SettingsPage: React.FC = () => {
     </div>
   );
 };
+
 

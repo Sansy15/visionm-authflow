@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/PasswordInput";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -127,9 +128,8 @@ const ResetPassword = () => {
           <form onSubmit={handleReset} className="space-y-4">
             <div>
               <Label htmlFor="password">New Password</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 value={resetPasswordForm.values.password}
                 onChange={resetPasswordForm.handleChange("password")}
                 onBlur={resetPasswordForm.handleBlur("password")}

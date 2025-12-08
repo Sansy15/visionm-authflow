@@ -1,5 +1,5 @@
 import React from "react";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { EmptyState } from "@/components/pages/EmptyState";
 import { LoadingState } from "@/components/pages/LoadingState";
@@ -7,10 +7,14 @@ import { CompanyMembers } from "@/components/CompanyMembers";
 import { Users } from "lucide-react";
 
 export const TeamMembersPage: React.FC = () => {
-  const { profile, isAdmin, loading } = useProfile();
+  const { sessionReady, user, profile, isAdmin, loading } = useProfile();
 
-  if (loading) {
+  if (!sessionReady || loading) {
     return <LoadingState message="Loading team members..." />;
+  }
+
+  if (sessionReady && !user) {
+    return null; // Will be redirected by ProtectedRoutes
   }
 
   if (!profile?.company_id) {
@@ -53,4 +57,5 @@ export const TeamMembersPage: React.FC = () => {
     </div>
   );
 };
+
 

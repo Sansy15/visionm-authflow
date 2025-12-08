@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { EmptyState } from "@/components/pages/EmptyState";
 import { LoadingState } from "@/components/pages/LoadingState";
@@ -13,17 +13,28 @@ import { useToast } from "@/hooks/use-toast";
 export const ProjectsPage: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { profile, loading: profileLoading } = useProfile();
+  const { sessionReady, user, profile, loading: profileLoading } = useProfile();
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (profile?.company_id && !profileLoading) {
+    // Early return if session not ready
+    if (!sessionReady) return;
+
+    // Clear data if no user
+    if (sessionReady && !user) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+
+    // Fetch only when session ready, user exists, and profile has company_id
+    if (sessionReady && user && profile?.company_id && !profileLoading) {
       loadProjects();
-    } else if (!profileLoading) {
+    } else if (sessionReady && user && !profileLoading) {
       setLoading(false);
     }
-  }, [profile?.company_id, profileLoading]);
+  }, [sessionReady, user?.id, profile?.company_id, profileLoading]);
 
   const loadProjects = async () => {
     if (!profile?.company_id) return;
@@ -131,4 +142,5 @@ export const ProjectsPage: React.FC = () => {
     </div>
   );
 };
+
 

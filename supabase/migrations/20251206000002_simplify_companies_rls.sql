@@ -12,3 +12,4 @@ CREATE POLICY "Users can create companies"
   ON public.companies FOR INSERT
   WITH CHECK (auth.uid() = created_by);
 
+

@@ -1,6 +1,7 @@
 import React from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/PasswordInput";
 import { cn } from "@/lib/utils";
 
 interface FormFieldWrapperProps {
@@ -14,6 +15,7 @@ interface FormFieldWrapperProps {
   error?: string;
   touched?: boolean;
   required?: boolean;
+  disabled?: boolean;
   children?: React.ReactNode; // For custom input components like Select
   className?: string;
 }
@@ -29,6 +31,7 @@ export const FormFieldWrapper: React.FC<FormFieldWrapperProps> = ({
   error,
   touched,
   required = false,
+  disabled = false,
   children,
   className,
 }) => {
@@ -41,18 +44,34 @@ export const FormFieldWrapper: React.FC<FormFieldWrapperProps> = ({
         {required && <span className="text-destructive ml-1">*</span>}
       </Label>
       {children || (
-        <Input
-          id={name}
-          name={name}
-          type={type}
-          value={value}
-          onChange={onChange}
-          onBlur={onBlur}
-          placeholder={placeholder}
-          className={cn(showError && "border-destructive")}
-          aria-invalid={showError ? "true" : "false"}
-          aria-describedby={showError ? `${name}-error` : undefined}
-        />
+        type === "password" ? (
+          <PasswordInput
+            id={name}
+            name={name}
+            value={value}
+            onChange={onChange}
+            onBlur={onBlur}
+            placeholder={placeholder}
+            disabled={disabled}
+            className={cn(showError && "border-destructive")}
+            aria-invalid={showError ? "true" : "false"}
+            aria-describedby={showError ? `${name}-error` : undefined}
+          />
+        ) : (
+          <Input
+            id={name}
+            name={name}
+            type={type}
+            value={value}
+            onChange={onChange}
+            onBlur={onBlur}
+            placeholder={placeholder}
+            disabled={disabled}
+            className={cn(showError && "border-destructive")}
+            aria-invalid={showError ? "true" : "false"}
+            aria-describedby={showError ? `${name}-error` : undefined}
+          />
+        )
       )}
       {showError && (
         <p id={`${name}-error`} className="mt-1 text-xs text-destructive" role="alert">
@@ -62,4 +81,5 @@ export const FormFieldWrapper: React.FC<FormFieldWrapperProps> = ({
     </div>
   );
 };
+
 

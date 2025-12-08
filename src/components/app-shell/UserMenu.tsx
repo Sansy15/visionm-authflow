@@ -12,7 +12,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { User, Settings, LogOut, Building2 } from "lucide-react";
-import { useProfile } from "@/contexts/ProfileContext";
+import { useProfile } from "@/hooks/useProfile";
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 
 export const UserMenu: React.FC = () => {
