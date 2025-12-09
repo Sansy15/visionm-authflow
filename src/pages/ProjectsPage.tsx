@@ -62,6 +62,15 @@ export const ProjectsPage: React.FC = () => {
   };
 
   const handleCreateProject = () => {
+    if (!profile?.company_id) {
+      toast({
+        title: "Company required",
+        description: "Please create or join a company before creating a project.",
+        variant: "destructive",
+      });
+      navigate("/dashboard?action=create-company");
+      return;
+    }
     navigate("/dashboard?action=create-project");
   };
 
@@ -99,7 +108,10 @@ export const ProjectsPage: React.FC = () => {
         title="Projects"
         description="Create and manage your dataset projects"
         actions={
-          <Button onClick={handleCreateProject}>
+          <Button 
+            onClick={handleCreateProject}
+            disabled={!profile?.company_id}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Create Project
           </Button>

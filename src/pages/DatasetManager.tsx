@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Grid3x3, List, X, Download, FileText } from "lucide-react";
+import { List, X, Download, FileText } from "lucide-react";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiUrl = (path: string) => {
@@ -153,7 +153,6 @@ const DatasetManager = () => {
   const [fileTypeFilter, setFileTypeFilter] = useState<"all" | "image" | "label">("all");
   const [fileSort, setFileSort] = useState<"name" | "size">("name");
   const [fileSortOrder, setFileSortOrder] = useState<"asc" | "desc">("asc");
-  const [viewMode, setViewMode] = useState<"tree" | "grid">("tree");
   const [selectedImageFile, setSelectedImageFile] = useState<FileEntry | null>(null);
   const [selectedLabelFile, setSelectedLabelFile] = useState<FileEntry | null>(null);
   const [labelFileContent, setLabelFileContent] = useState<string | null>(null);
@@ -455,6 +454,14 @@ const DatasetManager = () => {
     sort?: string,
     order?: string
   ) => {
+    console.log('🔍 [DEBUG] fetchFileManifest called:', {
+      datasetId,
+      page,
+      limit,
+      folder,
+      type
+    });
+    
     try {
       const headers = await getAuthHeaders();
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
@@ -463,6 +470,7 @@ const DatasetManager = () => {
       if (sort) qs.append("sort", sort);
       if (order) qs.append("order", order);
       const url = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/files?${qs.toString()}`);
+      console.log('🔍 [DEBUG] Fetching from URL:', url);
       const res = await fetch(url, { method: "GET", headers });
       if (!res.ok) {
         throw new Error(`files fetch failed ${res.status}`);
@@ -471,6 +479,20 @@ const DatasetManager = () => {
       // API returns: { files: [...], items: [...], totalFiles, total, totalPages, page, limit, datasetId }
       // Handle both 'files' and 'items' response formats
       const rawFiles = json.files || json.items || [];
+      
+      console.log('🔍 [DEBUG] Files response:', {
+        totalFiles: json.totalFiles,
+        filesCount: rawFiles.length,
+        firstFileId: rawFiles[0]?.id,
+        firstFileThumbnailAvailable: rawFiles[0]?.thumbnailAvailable,
+        firstFile: rawFiles[0] ? {
+          id: rawFiles[0].id,
+          fileId: rawFiles[0].fileId,
+          thumbnailAvailable: rawFiles[0].thumbnailAvailable,
+          originalName: rawFiles[0].originalName || rawFiles[0].name
+        } : null
+      });
+      
       // Map API response fields to FileEntry interface
       const list: FileEntry[] = rawFiles.map((file: any) => ({
         id: file.id || file.fileId,
@@ -488,6 +510,18 @@ const DatasetManager = () => {
         thumbUrl: file.thumbUrl,
         mime: file.mime,
       }));
+      
+      console.log('🔍 [DEBUG] Mapped FileEntry list:', {
+        totalMapped: list.length,
+        filesWithIds: list.filter(f => f.id).length,
+        filesWithThumbnails: list.filter(f => f.thumbnailAvailable === true).length,
+        sampleMapped: list[0] ? {
+          id: list[0].id,
+          thumbnailAvailable: list[0].thumbnailAvailable,
+          originalName: list[0].originalName
+        } : null
+      });
+      
       return { 
         list, 
         meta: {
@@ -497,12 +531,14 @@ const DatasetManager = () => {
         }
       };
     } catch (err) {
-      console.warn("fetchFileManifest error:", err);
+      console.error('❌ [DEBUG] fetchFileManifest error:', err);
       return { list: [] as FileEntry[], meta: null };
     }
   };
 
   const fetchAllFiles = async (datasetId: string) => {
+    console.log('🔍 [DEBUG] fetchAllFiles called for datasetId:', datasetId);
+    
     const all: FileEntry[] = [];
     let page = 1;
     const limit = 1000;
@@ -513,6 +549,18 @@ const DatasetManager = () => {
       if (list.length < limit) break;
       page += 1;
     }
+    
+    console.log('🔍 [DEBUG] fetchAllFiles result:', {
+      totalFiles: all.length,
+      filesWithIds: all.filter(f => f.id).length,
+      filesWithThumbnails: all.filter(f => f.thumbnailAvailable === true).length,
+      sampleFile: all[0] ? {
+        id: all[0].id,
+        thumbnailAvailable: all[0].thumbnailAvailable,
+        originalName: all[0].originalName
+      } : null
+    });
+    
     return all;
   };
 
@@ -564,14 +612,12 @@ const DatasetManager = () => {
     }
   };
 
+
   // ------- Handle folder selection -------
   const handleFolderSelect = (folderName: string) => {
-    setSelectedFolder(folderName);
-    setViewMode("grid");
-    const datasetId = selectedVersionDatasetId || currentDatasetId;
-    if (datasetId) {
-      fetchFolderFiles(datasetId, folderName, 1, true);
-    }
+    // Just toggle expansion in tree - no view switching needed
+    const path = folderName;
+    toggleExpanded(path);
   };
 
   // ------- Handle image click -------
@@ -639,10 +685,105 @@ const DatasetManager = () => {
   };
 
   const buildTreeFromFiles = (filesList: FileEntry[]) => {
+    console.log('🔍 [DEBUG] Building tree from:', {
+      dataSource: 'FileEntry[] from fetchFileManifest/fetchAllFiles',
+      totalFiles: filesList.length,
+      filesHaveIds: filesList.every(f => f.id),
+      filesWithIds: filesList.filter(f => f.id).length,
+      filesWithThumbnails: filesList.filter(f => f.thumbnailAvailable === true).length,
+      sampleFile: filesList[0] ? {
+        id: filesList[0].id,
+        thumbnailAvailable: filesList[0].thumbnailAvailable,
+        originalName: filesList[0].originalName
+      } : null
+    });
+    
     const root: any = { type: "folder", name: "", children: [] };
-
+    
+    // Step 1: Deduplicate files by originalName + type combination
+    // Prefer files from original folder structure over train/val/test copies
+    const fileMap = new Map<string, FileEntry>();
+    
     for (const f of filesList) {
-      // Use storedPath if available, otherwise construct from folder + originalName, fallback to legacy fields
+      const pathToUse = f.storedPath || (f.folder ? `${f.folder}/${f.originalName || f.name || ""}` : f.originalName || f.name || f.path || "");
+      const normalizedPath = pathToUse.toLowerCase();
+      
+      // Check if this is a processed copy (train/val/test)
+      const isProcessedCopy = normalizedPath.startsWith("train/") || 
+                               normalizedPath.startsWith("val/") || 
+                               normalizedPath.startsWith("test/") || 
+                               normalizedPath.startsWith("images/train/") || 
+                               normalizedPath.startsWith("images/val/") || 
+                               normalizedPath.startsWith("images/test/") ||
+                               normalizedPath.startsWith("labels/train/") || 
+                               normalizedPath.startsWith("labels/val/") || 
+                               normalizedPath.startsWith("labels/test/");
+      
+      // Create a unique key: normalize filename (extract just filename from path) + type
+      // This handles cases where originalName might be a full path or just filename
+      const normalizeFileName = (name: string): string => {
+        if (!name) return "";
+        // Extract just the filename from path (handle both "path/to/file.jpg" and "file.jpg")
+        const parts = name.split("/").filter(Boolean);
+        return parts[parts.length - 1] || name;
+      };
+      const fileName = normalizeFileName(f.originalName || f.name || f.storedName || "");
+      const dedupeKey = `${fileName}_${f.type || "image"}`;
+      
+      if (!fileMap.has(dedupeKey)) {
+        // First occurrence - add it
+        fileMap.set(dedupeKey, f);
+      } else {
+        // Duplicate found - merge metadata intelligently
+        const existing = fileMap.get(dedupeKey)!;
+        const existingPath = existing.storedPath || (existing.folder ? `${existing.folder}/${existing.originalName || existing.name || ""}` : existing.originalName || existing.name || existing.path || "");
+        const existingNormalized = existingPath.toLowerCase();
+        const existingIsProcessed = existingNormalized.startsWith("train/") || 
+                                    existingNormalized.startsWith("val/") || 
+                                    existingNormalized.startsWith("test/") || 
+                                    existingNormalized.startsWith("images/train/") || 
+                                    existingNormalized.startsWith("images/val/") || 
+                                    existingNormalized.startsWith("images/test/") ||
+                                    existingNormalized.startsWith("labels/train/") || 
+                                    existingNormalized.startsWith("labels/val/") || 
+                                    existingNormalized.startsWith("labels/test/");
+        
+        // Strategy: Always prefer original folder structure for display, but merge thumbnail metadata from processed copies
+        if (existingIsProcessed && !isProcessedCopy) {
+          // Existing is processed, new is original - replace with original but merge thumbnail if processed has it
+          const merged: FileEntry = {
+            ...f,
+            thumbnailAvailable: f.thumbnailAvailable || existing.thumbnailAvailable,
+            thumbUrl: f.thumbUrl || existing.thumbUrl,
+            url: f.url || existing.url,
+          };
+          fileMap.set(dedupeKey, merged);
+        } else if (!existingIsProcessed && isProcessedCopy) {
+          // Existing is original, new is processed - keep original but merge thumbnail from processed
+          const merged: FileEntry = {
+            ...existing,
+            thumbnailAvailable: existing.thumbnailAvailable || f.thumbnailAvailable,
+            thumbUrl: existing.thumbUrl || f.thumbUrl,
+            url: existing.url || f.url,
+          };
+          fileMap.set(dedupeKey, merged);
+        } else if (!existingIsProcessed && !isProcessedCopy) {
+          // Both are original - prefer the one with better metadata (thumbnail, etc.)
+          if ((f.thumbnailAvailable && !existing.thumbnailAvailable) || 
+              (f.id && !existing.id) ||
+              (f.storedPath && !existing.storedPath)) {
+            fileMap.set(dedupeKey, f);
+          }
+          // Otherwise keep existing
+        }
+        // If both are processed, keep the first one (shouldn't happen often)
+      }
+    }
+    
+    // Step 2: Build tree from deduplicated files
+    const deduplicatedFiles = Array.from(fileMap.values());
+    
+    for (const f of deduplicatedFiles) {
       const pathToUse = f.storedPath || (f.folder ? `${f.folder}/${f.originalName || f.name || ""}` : f.originalName || f.name || f.path || "");
       const parts = pathToUse.split("/").filter(Boolean);
       let node = root;
@@ -651,16 +792,34 @@ const DatasetManager = () => {
         const isFile = i === parts.length - 1;
         if (isFile) {
           const filePath = f.storedPath || (f.folder ? `${f.folder}/${f.originalName || f.name || ""}` : f.originalName || f.name || f.path || "");
-          node.children.push({
-            type: "file",
-            name: part,
-            path: filePath,
-            fileId: f.id,
-            thumbnailAvailable: f.thumbnailAvailable,
-            url: f.url,
-            // Legacy field for backward compatibility
-            thumbUrl: f.thumbUrl,
-          });
+          // Check if file already exists in this node to prevent duplicates
+          const existingFile = node.children.find((c: any) => c.type === "file" && c.fileId === f.id);
+          if (!existingFile) {
+            const fileNode = {
+              type: "file",
+              name: part,
+              path: filePath,
+              fileId: f.id,
+              fileType: f.type || "image", // Preserve file type (image/label) - using fileType to avoid conflict with node.type
+              // Use actual thumbnailAvailable from backend (don't default to true)
+              thumbnailAvailable: f.thumbnailAvailable,
+              url: f.url,
+              // Legacy field for backward compatibility
+              thumbUrl: f.thumbUrl,
+            };
+            
+            // Debug log for files without IDs
+            if (!f.id) {
+              console.warn('⚠️ [DEBUG] File without ID added to tree:', {
+                name: part,
+                path: filePath,
+                type: f.type,
+                thumbnailAvailable: f.thumbnailAvailable
+              });
+            }
+            
+            node.children.push(fileNode);
+          }
         } else {
           let child = node.children.find((c: any) => c.type === "folder" && c.name === part);
           if (!child) {
@@ -925,21 +1084,37 @@ const DatasetManager = () => {
 
   // ------- Select a version and load everything to resume work -------
   const onSelectVersion = async (datasetId: string) => {
+    console.log('🔍 [DEBUG] onSelectVersion called for datasetId:', datasetId);
+    
     try {
       setSelectedVersionDatasetId(datasetId);
       setSelectedFolder(null); // Reset folder selection
-      setViewMode("tree"); // Default to tree view
 
       // Fetch full dataset metadata first (lightweight)
+      let metaJson: any = null;
       try {
         const headers = await getAuthHeaders();
         const metaUrl = apiUrl(`/dataset/${encodeURIComponent(datasetId)}`);
+        console.log('🔍 [DEBUG] Fetching metadata from:', metaUrl);
         const metaRes = await fetch(metaUrl, { headers });
         if (metaRes.ok) {
-          const metaJson = await metaRes.json();
+          metaJson = await metaRes.json();
           setMetadata(metaJson);
+          
+          console.log('🔍 [DEBUG] Metadata response:', {
+            hasFiles: !!metaJson.files,
+            filesIsArray: Array.isArray(metaJson.files),
+            filesCount: metaJson.files?.length || 0,
+            firstFileId: metaJson.files?.[0]?.id,
+            firstFileThumbnailAvailable: metaJson.files?.[0]?.thumbnailAvailable,
+            dataSource: 'GET /api/dataset/:datasetId (metadata endpoint)'
+          });
+          
           // Build tree from metadata.files if available (faster than fetching all)
+          // ⚠️ WARNING: This endpoint may not have file.id or thumbnailAvailable properly set
           if (metaJson.files && Array.isArray(metaJson.files)) {
+            console.warn('⚠️ [DEBUG] Using metadata.files to build tree - this may not have file IDs!');
+            
             const filesList: FileEntry[] = metaJson.files.map((file: any) => ({
               id: file.id || file._id,
               storedName: file.storedName,
@@ -948,11 +1123,24 @@ const DatasetManager = () => {
               size: file.size,
               folder: file.folder,
               storedPath: file.storedPath || file.path || "",
+              // Use actual thumbnailAvailable from backend (don't default to true)
               thumbnailAvailable: file.thumbnailAvailable,
               url: file.url,
               name: file.originalName || file.name,
               path: file.storedPath || file.path,
             }));
+            
+            console.log('🔍 [DEBUG] Mapped files from metadata:', {
+              totalMapped: filesList.length,
+              filesWithIds: filesList.filter(f => f.id).length,
+              filesWithThumbnails: filesList.filter(f => f.thumbnailAvailable === true).length,
+              sampleMapped: filesList[0] ? {
+                id: filesList[0].id,
+                thumbnailAvailable: filesList[0].thumbnailAvailable,
+                originalName: filesList[0].originalName
+              } : null
+            });
+            
             setFileManifest(filesList);
             setFolderTree(buildTreeFromFiles(filesList));
             const previews = filesList.slice(0, 50).map((f) => ({
@@ -981,9 +1169,9 @@ const DatasetManager = () => {
       }
 
       // Fallback: if metadata.files not available, fetch all files (for tree view)
-      // Use a flag to track if we got files from metadata
-      const currentMetadata = metadata;
-      if (!currentMetadata?.files || !Array.isArray(currentMetadata.files) || currentMetadata.files.length === 0) {
+      // Check metaJson.files directly (not stale metadata state) to avoid double-fetching
+      if (!metaJson?.files || !Array.isArray(metaJson.files) || metaJson.files.length === 0) {
+        console.log('🔍 [DEBUG] metadata.files not available, using fetchAllFiles (GET /api/dataset/:datasetId/files)');
         try {
           const allFiles = await fetchAllFiles(datasetId);
           setFileManifest(allFiles || []);
@@ -997,7 +1185,7 @@ const DatasetManager = () => {
           }));
           setMetadata((prev) => {
             if (!prev) return null;
-            return { ...prev, previews };
+            return { ...prev, previews: previews as any };
           });
         } catch (err) {
           console.warn("Failed to fetch files for selected version:", err);
@@ -1036,6 +1224,10 @@ const DatasetManager = () => {
       const headers = await getAuthHeaders();
       const url = apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(fileId)}/thumbnail`);
       const res = await fetch(url, { method: "GET", headers });
+      // Handle 404 gracefully - thumbnail doesn't exist, return null (not an error)
+      if (res.status === 404) {
+        return null;
+      }
       if (!res.ok) throw new Error("thumbnail fetch failed");
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
@@ -1052,6 +1244,18 @@ const DatasetManager = () => {
   };
 
   function TreeNode({ node, parentPath = "" }: { node: any; parentPath?: string }) {
+    // Add debug log at the start of the component for file nodes
+    if (node.type === "file") {
+      console.log('🔍 [DEBUG] TreeNode rendered (file):', {
+        nodeName: node.name,
+        nodeFileId: node.fileId,
+        nodeThumbnailAvailable: node.thumbnailAvailable,
+        nodeType: (node as any).fileType || node.type,
+        hasFileId: !!node.fileId,
+        hasThumbnailAvailable: node.thumbnailAvailable === true,
+        fileType: (node as any).fileType
+      });
+    }
     const path = parentPath ? `${parentPath}/${node.name}`.replace(/^\/+/, "") : node.name || "";
     const isFolder = node.type === "folder";
 
@@ -1094,44 +1298,81 @@ const DatasetManager = () => {
       );
     } else {
       const datasetId = selectedVersionDatasetId || currentDatasetId;
-      const thumbEndpoint = datasetId && node.thumbnailAvailable 
-        ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(node.fileId)}/thumbnail`) 
-        : null;
-      const fileEndpoint = datasetId 
-        ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(node.fileId)}`) 
-        : "#";
-
+      
       const fileEntry: FileEntry = {
         id: node.fileId,
         originalName: node.name,
         storedPath: node.path,
         folder: node.folder,
-        type: node.type || "image",
+        type: (node as any).fileType || node.type || "image", // Use fileType if available, fallback to node.type
         thumbnailAvailable: node.thumbnailAvailable,
         url: node.url,
       };
 
+      const fileType = (node as any).fileType || node.type || "image";
+      const isImage = fileType === "image";
+      const isLabel = fileType === "label";
+      
+      // Only generate thumbnail endpoint if:
+      // 1. datasetId exists
+      // 2. thumbnailAvailable is explicitly true (not undefined, not false)
+      // 3. fileId exists (must be from GET /api/dataset/:datasetId/files endpoint)
+      // 4. file type is image
+      const fileId = node.fileId; // Must be from GET /api/dataset/:datasetId/files (file.id field)
+      
+      console.log('🔍 [DEBUG] Thumbnail URL construction:', {
+        datasetId,
+        fileId,
+        thumbnailAvailable: node.thumbnailAvailable,
+        isImage,
+        fileType: (node as any).fileType || node.type,
+        willBuildUrl: datasetId && node.thumbnailAvailable === true && fileId && isImage,
+        conditions: {
+          hasDatasetId: !!datasetId,
+          thumbnailAvailableIsTrue: node.thumbnailAvailable === true,
+          hasFileId: !!fileId,
+          isImageType: isImage
+        }
+      });
+      
+      const thumbEndpoint = datasetId && node.thumbnailAvailable === true && fileId && isImage
+        ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(fileId)}/thumbnail`) 
+        : null;
+      
+      console.log('🔍 [DEBUG] Thumbnail endpoint:', thumbEndpoint);
+      const fileEndpoint = datasetId 
+        ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(node.fileId)}`) 
+        : "#";
+
       return (
         <div className="pl-6 py-1 flex items-center gap-3 text-xs">
-          {node.thumbUrl ? (
+          {/* Show thumbnail for images only */}
+          {isImage && node.thumbUrl ? (
             <img src={node.thumbUrl} className="w-12 h-8 object-cover rounded" alt={node.name} />
-          ) : node.thumbnailAvailable && thumbEndpoint ? (
+          ) : isImage && node.thumbnailAvailable === true && thumbEndpoint ? (
+            // Only show thumbnail if thumbnailAvailable is explicitly true
             <img
               src={thumbEndpoint}
               className="w-12 h-8 object-cover rounded cursor-pointer"
               alt={node.name}
-              onClick={() => node.type === "image" && handleImageClick(fileEntry)}
+              onClick={() => handleImageClick(fileEntry)}
               onError={async (e) => {
-                // Only try blob fetch if thumbnailAvailable was true
-                const objUrl = await fetchThumbnailAsObjectUrl(datasetId!, node.fileId);
+                // Try blob fetch as fallback if direct thumbnail URL fails
+                // Use fileId from files endpoint (must be from GET /api/dataset/:datasetId/files)
+                const fileIdToUse = node.fileId;
+                const objUrl = await fetchThumbnailAsObjectUrl(datasetId!, fileIdToUse);
                 if (objUrl) {
                   (e.target as HTMLImageElement).src = objUrl;
                 } else {
-                  // Hide image if thumbnail fetch fails
-                  (e.target as HTMLImageElement).style.display = 'none';
+                  // 404 or other error - show placeholder instead of hiding
+                  (e.target as HTMLImageElement).src = "/placeholder-image.png";
+                  (e.target as HTMLImageElement).style.opacity = "0.5";
                 }
               }}
             />
+          ) : isLabel ? (
+            // Show file icon for label files
+            <FileText className="w-12 h-8 text-muted-foreground flex-shrink-0" />
           ) : null}
 
           <a 
@@ -1140,7 +1381,7 @@ const DatasetManager = () => {
             rel="noreferrer" 
             className="break-words"
             onClick={(e) => {
-              if (node.type === "image") {
+              if (isImage) {
                 e.preventDefault();
                 handleImageClick(fileEntry);
               }
@@ -1327,6 +1568,36 @@ const DatasetManager = () => {
         </div>
       )}
 
+      {/* Versions list */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Versions</CardTitle>
+          <CardDescription>Click a version to view its stored subfolders & files</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {versions.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No versions yet.</div>
+          ) : (
+            <div className="space-y-1">
+              {versions.map((v) => (
+                <div key={v.datasetId} className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <button className="text-left" onClick={() => onSelectVersion(v.datasetId)}>
+                      <div className="font-medium">{v.version || v.datasetId}</div>
+                      <div className="text-xs text-muted-foreground">{v.createdAt ? new Date(v.createdAt).toLocaleString() : ""}</div>
+                    </button>
+                    {selectedVersionDatasetId === v.datasetId && <span className="text-xs text-primary"> (selected)</span>}
+                  </div>
+                  <div>
+                    <a className="text-xs" href={apiUrl(`/dataset/${encodeURIComponent(v.datasetId)}/download`)} target="_blank" rel="noreferrer">Download</a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {metadata && (
         <div className="mt-4 max-w-2xl space-y-4">
           <Card>
@@ -1359,249 +1630,27 @@ const DatasetManager = () => {
         </div>
       )}
 
-      {/* Versions list */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Versions</CardTitle>
-          <CardDescription>Click a version to view its stored subfolders & files</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {versions.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No versions yet.</div>
-          ) : (
-            <div className="space-y-1">
-              {versions.map((v) => (
-                <div key={v.datasetId} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <button className="text-left" onClick={() => onSelectVersion(v.datasetId)}>
-                      <div className="font-medium">{v.version || v.datasetId}</div>
-                      <div className="text-xs text-muted-foreground">{v.createdAt ? new Date(v.createdAt).toLocaleString() : ""}</div>
-                    </button>
-                    {selectedVersionDatasetId === v.datasetId && <span className="text-xs text-primary"> (selected)</span>}
-                  </div>
-                  <div>
-                    <a className="text-xs" href={apiUrl(`/dataset/${encodeURIComponent(v.datasetId)}/download`)} target="_blank" rel="noreferrer">Download</a>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* File Browser - Tree or Grid View */}
+      {/* File Browser - Tree View */}
       {selectedVersionDatasetId && metadata && (
         <Card className="mt-6">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>File Browser</CardTitle>
-                <CardDescription>
-                  {selectedFolder ? `Viewing folder: ${selectedFolder}` : "Browse dataset files"}
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant={viewMode === "tree" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setViewMode("tree")}
-                >
-                  <List className="h-4 w-4 mr-2" />
-                  Tree
-                </Button>
-                <Button
-                  variant={viewMode === "grid" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setViewMode("grid")}
-                >
-                  <Grid3x3 className="h-4 w-4 mr-2" />
-                  Grid
-                </Button>
-              </div>
+            <div>
+              <CardTitle>File Browser</CardTitle>
+              <CardDescription>Browse all dataset files</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
-            {viewMode === "tree" ? (
-              <div>
-                {folderTree ? (
-                  <TreeNode node={folderTree} />
-                ) : (
-                  <div className="text-sm text-muted-foreground">No files available</div>
-                )}
-              </div>
-            ) : (
-              <div>
-                {/* Filters and Sort Controls */}
-                <div className="mb-4 flex items-center gap-4 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs">Filter:</Label>
-                    <Select value={fileTypeFilter} onValueChange={(value: "all" | "image" | "label") => {
-                      setFileTypeFilter(value);
-                      const datasetId = selectedVersionDatasetId || currentDatasetId;
-                      if (datasetId && selectedFolder) {
-                        fetchFolderFiles(datasetId, selectedFolder, 1, true);
-                      }
-                    }}>
-                      <SelectTrigger className="w-32 h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Files</SelectItem>
-                        <SelectItem value="image">Images</SelectItem>
-                        <SelectItem value="label">Labels</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs">Sort:</Label>
-                    <Select value={fileSort} onValueChange={(value: "name" | "size") => {
-                      setFileSort(value);
-                      const datasetId = selectedVersionDatasetId || currentDatasetId;
-                      if (datasetId && selectedFolder) {
-                        fetchFolderFiles(datasetId, selectedFolder, 1, true);
-                      }
-                    }}>
-                      <SelectTrigger className="w-32 h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="name">Name</SelectItem>
-                        <SelectItem value="size">Size</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs">Order:</Label>
-                    <Select value={fileSortOrder} onValueChange={(value: "asc" | "desc") => {
-                      setFileSortOrder(value);
-                      const datasetId = selectedVersionDatasetId || currentDatasetId;
-                      if (datasetId && selectedFolder) {
-                        fetchFolderFiles(datasetId, selectedFolder, 1, true);
-                      }
-                    }}>
-                      <SelectTrigger className="w-24 h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="asc">Ascending</SelectItem>
-                        <SelectItem value="desc">Descending</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {selectedFolder && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedFolder(null);
-                        setViewMode("tree");
-                      }}
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Clear Folder
-                    </Button>
-                  )}
-                </div>
-
-                {/* Grid View */}
-                {selectedFolder ? (
-                  <div>
-                    {folderFilesLoading && folderFiles.length === 0 ? (
-                      <div className="text-sm text-muted-foreground py-8 text-center">Loading files...</div>
-                    ) : folderFiles.length === 0 ? (
-                      <div className="text-sm text-muted-foreground py-8 text-center">No files in this folder</div>
-                    ) : (
-                      <>
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                          {folderFiles.map((file) => {
-                            const datasetId = selectedVersionDatasetId || currentDatasetId;
-                            const thumbEndpoint = datasetId && file.thumbnailAvailable
-                              ? apiUrl(`/dataset/${encodeURIComponent(datasetId)}/file/${encodeURIComponent(file.id)}/thumbnail`)
-                              : null;
-                            
-                            return (
-                              <div
-                                key={file.id}
-                                className="border rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
-                                onClick={() => file.type === "image" && handleImageClick(file)}
-                              >
-                                <div className="aspect-square bg-muted flex items-center justify-center relative">
-                                  {file.type === "image" ? (
-                                    thumbEndpoint ? (
-                                      <img
-                                        src={thumbEndpoint}
-                                        alt={file.originalName}
-                                        className="w-full h-full object-cover"
-                                        onError={async (e) => {
-                                          const objUrl = await fetchThumbnailAsObjectUrl(datasetId!, file.id);
-                                          if (objUrl) {
-                                            (e.target as HTMLImageElement).src = objUrl;
-                                          } else {
-                                            (e.target as HTMLImageElement).style.display = 'none';
-                                          }
-                                        }}
-                                      />
-                                    ) : (
-                                      <div className="text-xs text-muted-foreground text-center p-2">No thumbnail</div>
-                                    )
-                                  ) : (
-                                    <FileText className="h-8 w-8 text-muted-foreground" />
-                                  )}
-                                </div>
-                                <div className="p-2">
-                                  <div className="text-xs font-medium truncate" title={file.originalName}>
-                                    {file.originalName}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {file.size ? `${(file.size / 1024).toFixed(1)} KB` : ""}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        {folderFilesPage < folderFilesTotalPages && (
-                          <div className="mt-4 text-center">
-                            <Button
-                              variant="outline"
-                              onClick={loadMoreFolderFiles}
-                              disabled={folderFilesLoading}
-                            >
-                              {folderFilesLoading ? "Loading..." : `Load More (${folderFilesTotal - folderFiles.length} remaining)`}
-                            </Button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground py-8 text-center">
-                    Select a folder from the tree view to browse files
-                  </div>
-                )}
-              </div>
-            )}
+            <div>
+              {folderTree ? (
+                <TreeNode node={folderTree} />
+              ) : (
+                <div className="text-sm text-muted-foreground">No files available</div>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Previews (server-provided) */}
-      {metadata?.previews && metadata.previews.length > 0 && (
-        <Card className="mt-6">
-          <CardHeader><CardTitle>Preview samples</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {metadata.previews.map((p, i) => (
-              <div key={i} className="border rounded overflow-hidden">
-                {p.thumbUrl ? <img src={p.thumbUrl} alt={`preview-${i}`} className="w-full h-32 object-cover" />
-                  : p.thumbData ? <img src={p.thumbData} alt={`preview-${i}`} className="w-full h-32 object-cover" />
-                    : p.url ? <img src={p.url} alt={`preview-${i}`} className="w-full h-32 object-cover" />
-                      : <div className="p-2 text-xs text-muted-foreground">No preview available</div>}
-                <div className="p-2 text-xs break-words"><div className="font-mono">{p.path}</div></div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Image Viewer Modal */}
       <Dialog open={!!selectedImageFile} onOpenChange={(open) => {

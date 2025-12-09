@@ -38,10 +38,10 @@ const handler = async (req: Request): Promise<Response> => {
       return new Response("Request not found", { status: 404 });
     }
 
-    // 2) Update request status
+    // 2) Update request status to ignored (hidden from list)
     const { error: updateError } = await supabase
       .from("workspace_join_requests")
-      .update({ status: "rejected" })
+      .update({ status: "ignored" })
       .eq("token", token);
 
     if (updateError) throw updateError;

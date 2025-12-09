@@ -3,15 +3,10 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { Resend } from "https://esm.sh/resend@4.0.0";
 
-const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-// Normalize APP_URL to remove trailing slashes
-const appUrl = Deno.env.get("APP_URL")!.replace(/\/+$/, '');
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
 };
 
@@ -22,7 +17,30 @@ interface RequestBody {
 }
 
 serve(async (req: Request): Promise<Response> => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  // Handle CORS preflight FIRST - before any initialization that might fail
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { 
+      status: 200,
+      headers: corsHeaders 
+    });
+  }
+
+  // Initialize environment variables after OPTIONS check
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const appUrlRaw = Deno.env.get("APP_URL");
+  
+  if (!supabaseUrl || !supabaseKey || !appUrlRaw) {
+    return new Response(
+      JSON.stringify({ success: false, error: "Server configuration error" }),
+      { status: 500, headers: corsHeaders }
+    );
+  }
+
+  const resend = resendApiKey ? new Resend(resendApiKey) : null;
+  // Normalize APP_URL to remove trailing slashes
+  const appUrl = appUrlRaw.replace(/\/+$/, '');
 
   try {
     const body: RequestBody = await req.json();
@@ -85,10 +103,11 @@ serve(async (req: Request): Promise<Response> => {
     const approveLink = `${appUrl}/dashboard?token=${token}&action=approve`;
     const rejectLink = `${appUrl}/dashboard?token=${token}&action=reject`;
 
-    // 3) Send email via Resend
+    // 3) Send email via Resend (if configured)
     let emailSent = false;
-    try {
-      await resend.emails.send({
+    if (resend) {
+      try {
+        await resend.emails.send({
         from: "VisionM <no-reply@your-verified-domain.com>", // must be verified on Resend
         to: [adminEmail],
         subject: `Workspace Join Request — ${companyName}`,
@@ -105,19 +124,27 @@ serve(async (req: Request): Promise<Response> => {
         `,
       });
 
-      emailSent = true;
+        emailSent = true;
 
-      // update row status to email_sent
+        // update row status to email_sent
+        await supabase
+          .from("workspace_join_requests")
+          .update({ status: "email_sent" })
+          .eq("id", requestId);
+      } catch (sendErr) {
+        console.error("Resend error:", sendErr);
+        // update DB to show email failed (so you can retry)
+        await supabase
+          .from("workspace_join_requests")
+          .update({ status: "email_failed", error_message: String(sendErr) })
+          .eq("id", requestId);
+      }
+    } else {
+      console.warn("Resend API key not configured - skipping email send");
+      // Still mark as email_sent since we can't send (or mark as pending)
       await supabase
         .from("workspace_join_requests")
-        .update({ status: "email_sent" })
-        .eq("id", requestId);
-    } catch (sendErr) {
-      console.error("Resend error:", sendErr);
-      // update DB to show email failed (so you can retry)
-      await supabase
-        .from("workspace_join_requests")
-        .update({ status: "email_failed", error_message: String(sendErr) })
+        .update({ status: "pending" })
         .eq("id", requestId);
     }
 

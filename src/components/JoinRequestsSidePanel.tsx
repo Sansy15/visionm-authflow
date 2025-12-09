@@ -48,12 +48,12 @@ export const JoinRequestsSidePanel: React.FC<JoinRequestsSidePanelProps> = ({
 
     setLoading(true);
     try {
-      // Fetch requests first
+      // Fetch requests first - include pending, email_sent, and approved (exclude ignored)
       const { data: requestsData, error: requestsError } = await supabase
         .from("workspace_join_requests")
         .select("*")
         .eq("admin_email", adminEmail)
-        .in("status", ["pending", "email_sent"])
+        .in("status", ["pending", "email_sent", "approved"])
         .order("created_at", { ascending: false });
 
       if (requestsError) throw requestsError;
@@ -157,10 +157,10 @@ export const JoinRequestsSidePanel: React.FC<JoinRequestsSidePanelProps> = ({
 
     setActionLoading(requestId);
     try {
-      // 1. Update request status to rejected
+      // 1. Update request status to ignored (hidden from list)
       const { error: updateError } = await supabase
         .from("workspace_join_requests")
-        .update({ status: "rejected" })
+        .update({ status: "ignored" })
         .eq("id", requestId);
 
       if (updateError) throw updateError;

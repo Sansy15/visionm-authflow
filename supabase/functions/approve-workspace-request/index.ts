@@ -2,21 +2,37 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { Resend } from "https://esm.sh/resend@4.0.0";
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const frontendUrl = Deno.env.get("FRONTEND_URL")!; // e.g. http://localhost:5173
-const resend = new Resend(Deno.env.get("RESEND_API_KEY")!);
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Content-Type": "application/json",
 };
 
 const handler = async (req: Request): Promise<Response> => {
-  // Handle CORS preflight
+  // Handle CORS preflight FIRST - before any initialization
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { 
+      status: 200,
+      headers: corsHeaders 
+    });
   }
+
+  // Initialize environment variables after OPTIONS check
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const frontendUrl = Deno.env.get("FRONTEND_URL");
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+
+  if (!supabaseUrl || !supabaseKey || !frontendUrl) {
+    return new Response(
+      JSON.stringify({ success: false, error: "Server configuration error" }),
+      { status: 500, headers: corsHeaders }
+    );
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
   try {
     const url = new URL(req.url);
@@ -37,12 +53,10 @@ const handler = async (req: Request): Promise<Response> => {
         JSON.stringify({ success: false, error: "Invalid token" }),
         {
           status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: corsHeaders,
         }
       );
     }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // 1) Get join request
     const { data: request, error: fetchError } = await supabase
@@ -129,27 +143,34 @@ const handler = async (req: Request): Promise<Response> => {
 
     if (profileFetchError) {
       console.error("Could not fetch profile for email:", profileFetchError);
-    } else if (profile?.email) {
+    } else if (profile?.email && resend) {
       const workspaceLink = `${frontendUrl}/dashboard`; // or /app/workspace etc.
 
-      // 6) Send approval email to user
-      await resend.emails.send({
-        from: "VisionM <no-reply@visionm.com>",
-        to: [profile.email],
-        subject: "Workspace Access Approved",
-        html: `
-          <h1>Access Approved</h1>
-          <p>Hi ${profile.name ?? ""},</p>
-          <p>Your request to join the workspace for <strong>${request.company_name}</strong> has been approved.</p>
-          <p>You can access your workspace using the link below:</p>
-          <p>
-            <a href="${workspaceLink}" style="display:inline-block;padding:12px 24px;background:#0f766e;color:#ffffff;text-decoration:none;border-radius:4px;">
-              Open Workspace
-            </a>
-          </p>
-          <p>If you did not request this, please ignore this email.</p>
-        `,
-      });
+      // 6) Send approval email to user (if Resend is configured)
+      try {
+        await resend.emails.send({
+          from: "VisionM <no-reply@visionm.com>",
+          to: [profile.email],
+          subject: "Workspace Access Approved",
+          html: `
+            <h1>Access Approved</h1>
+            <p>Hi ${profile.name ?? ""},</p>
+            <p>Your request to join the workspace for <strong>${request.company_name}</strong> has been approved.</p>
+            <p>You can access your workspace using the link below:</p>
+            <p>
+              <a href="${workspaceLink}" style="display:inline-block;padding:12px 24px;background:#0f766e;color:#ffffff;text-decoration:none;border-radius:4px;">
+                Open Workspace
+              </a>
+            </p>
+            <p>If you did not request this, please ignore this email.</p>
+          `,
+        });
+      } catch (emailError) {
+        console.error("Error sending approval email:", emailError);
+        // Don't fail the whole operation if email fails
+      }
+    } else if (profile?.email && !resend) {
+      console.warn("Resend API key not configured - skipping approval email");
     }
 
     // 7) Return JSON response (for Dashboard handler) or HTML (for direct browser access)

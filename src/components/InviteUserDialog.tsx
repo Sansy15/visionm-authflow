@@ -1,7 +1,13 @@
 // src/components/InviteUserDialog.tsx
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { FormFieldWrapper } from "@/components/FormFieldWrapper";
+import { useFormValidation } from "@/hooks/useFormValidation";
+import {
+  inviteUserSchema,
+  type InviteUserFormData,
+} from "@/lib/validations/authSchemas";
+import { useToast } from "@/hooks/use-toast";
 
 interface Props {
   companyId: string;
@@ -12,15 +18,39 @@ export const InviteUserDialog: React.FC<Props> = ({
   companyId,
   accessToken,
 }) => {
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
 
+  const form = useFormValidation({
+    schema: inviteUserSchema,
+    initialValues: {
+      email: "",
+      name: "",
+    },
+    validateOnChange: false,
+    validateOnBlur: true,
+  });
+
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
+    
     if (!companyId) {
-      alert("Company id missing");
+      toast({
+        title: "Error",
+        description: "Company id missing",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate form
+    if (!form.validateForm()) {
+      toast({
+        title: "Please check your details",
+        description: "Fix the highlighted errors before sending the invite.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -40,8 +70,8 @@ export const InviteUserDialog: React.FC<Props> = ({
         },
         body: JSON.stringify({
           companyId,
-          inviteEmail: email,
-          inviteName: name,
+          inviteEmail: form.values.email,
+          inviteName: form.values.name || undefined,
         }),
       });
 
@@ -57,12 +87,66 @@ export const InviteUserDialog: React.FC<Props> = ({
       console.log("create-invite response:", res.status, data);
 
       if (!res.ok || data?.success === false) {
-        const msg =
-          data?.error ||
-          data?.message ||
-          data?.raw ||
-          `Invite failed with status ${res.status}`;
-        alert("Invite failed: " + msg);
+        // Extract precise error message with priority
+        let errorMessage = "";
+        
+        // Priority 1: Check for details (most specific)
+        if (data?.details) {
+          errorMessage = data.error 
+            ? `${data.error}: ${data.details}`
+            : data.details;
+        }
+        // Priority 2: Main error message
+        else if (data?.error) {
+          errorMessage = data.error;
+          // Add error code if available
+          if (data?.errorCode) {
+            errorMessage += ` (Error Code: ${data.errorCode})`;
+          }
+        }
+        // Priority 3: Generic message field
+        else if (data?.message) {
+          errorMessage = data.message;
+        }
+        // Priority 4: Check for rate limiting or specific HTTP status messages
+        else if (res.status === 429) {
+          errorMessage = "Rate limit exceeded. Please wait a moment and try again.";
+        }
+        else if (res.status === 403) {
+          errorMessage = "Insufficient permissions. You don't have access to perform this action.";
+        }
+        else if (res.status === 401) {
+          errorMessage = "Authentication failed. Please sign in again.";
+        }
+        else if (res.status === 404) {
+          errorMessage = "Resource not found. Please check and try again.";
+        }
+        else if (res.status === 400) {
+          errorMessage = "Invalid request. Please check your input and try again.";
+        }
+        // Priority 5: Raw response or status-based fallback
+        else if (data?.raw) {
+          errorMessage = data.raw;
+        }
+        else {
+          errorMessage = `Invite failed with status ${res.status}`;
+        }
+
+        // Log detailed error for debugging
+        console.error("Invite error details:", {
+          status: res.status,
+          error: data?.error,
+          details: data?.details,
+          errorCode: data?.errorCode,
+          message: data?.message,
+          fullResponse: data,
+        });
+
+        toast({
+          title: "Invite failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
         if (data?.inviteLink) {
           console.log("Manual invite link:", data.inviteLink);
           setLastInviteLink(data.inviteLink);
@@ -75,12 +159,41 @@ export const InviteUserDialog: React.FC<Props> = ({
         setLastInviteLink(data.inviteLink);
       }
 
-      setEmail("");
-      setName("");
-      alert("Invite sent.");
+      form.resetForm();
+      toast({
+        title: "Invite sent",
+        description: "The invitation has been sent successfully.",
+      });
     } catch (err: any) {
-      console.error("invite_error", err);
-      alert("Invite failed: " + (err?.message ?? String(err)));
+      console.error("Invite network/parsing error:", err);
+      
+      // Handle network errors specifically
+      let errorMessage = "Something went wrong. Please try again.";
+      
+      if (err?.message) {
+        // Check for network-related errors
+        if (err.message.includes("fetch") || err.message.includes("network") || err.message.includes("Failed to fetch")) {
+          errorMessage = "Network error: Unable to connect to the server. Please check your internet connection and try again.";
+        }
+        // Check for timeout errors
+        else if (err.message.includes("timeout") || err.message.includes("aborted")) {
+          errorMessage = "Request timed out. Please try again.";
+        }
+        // Check for CORS errors
+        else if (err.message.includes("CORS") || err.message.includes("cross-origin")) {
+          errorMessage = "Connection error: Please refresh the page and try again.";
+        }
+        // Use the error message if it's specific
+        else {
+          errorMessage = err.message;
+        }
+      }
+      
+      toast({
+        title: "Invite failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -99,25 +212,32 @@ export const InviteUserDialog: React.FC<Props> = ({
       {/* FORM SECTION */}
       <form
         onSubmit={handleInvite}
-        className="flex flex-col gap-3 items-stretch"
+        className="space-y-4"
       >
-        <div className="flex flex-col gap-2">
-          <Input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="user@example.com"
-            type="email"
-            required
-            className="w-full"
-          />
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Optional name"
-            type="text"
-            className="w-full"
-          />
-        </div>
+        <FormFieldWrapper
+          label="Email"
+          name="email"
+          type="email"
+          value={form.values.email}
+          onChange={form.handleChange("email")}
+          onBlur={form.handleBlur("email")}
+          error={form.getFieldError("email")}
+          touched={form.isFieldTouched("email")}
+          placeholder="user@example.com"
+          required
+        />
+
+        <FormFieldWrapper
+          label="Name (Optional)"
+          name="name"
+          type="text"
+          value={form.values.name || ""}
+          onChange={form.handleChange("name")}
+          onBlur={form.handleBlur("name")}
+          error={form.getFieldError("name")}
+          touched={form.isFieldTouched("name")}
+          placeholder="Optional name"
+        />
 
         <div className="flex justify-end">
           <Button type="submit" disabled={loading}>

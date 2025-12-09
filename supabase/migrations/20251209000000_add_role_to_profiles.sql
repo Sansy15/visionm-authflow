@@ -51,3 +51,4 @@ CREATE INDEX IF NOT EXISTS idx_profiles_company_role ON public.profiles(company_
 -- - member: users with company_id but not admin
 -- ============================================================================
 
+

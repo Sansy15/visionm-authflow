@@ -10,7 +10,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, {
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -63,17 +63,30 @@ serve(async (req: Request) => {
     }
 
     // Get user's email to verify it matches invite email
-    const { data: userProfile } = await supabase
+    const { data: userProfile, error: profileFetchError } = await supabase
       .from("profiles")
       .select("email")
       .eq("id", userId)
       .maybeSingle();
 
-    if (!userProfile) {
+    if (profileFetchError) {
+      console.error("Error fetching profile:", profileFetchError);
       return new Response(
         JSON.stringify({
           ok: false,
-          error: "User profile not found",
+          error: "Failed to fetch user profile",
+          details: profileFetchError.message,
+        }),
+        { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
+      );
+    }
+
+    if (!userProfile) {
+      console.error("User profile not found for userId:", userId);
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "User profile not found. Please try signing out and signing in again.",
         }),
         { status: 404, headers: { "Content-Type": "application/json", ...CORS } },
       );
@@ -106,7 +119,8 @@ serve(async (req: Request) => {
         JSON.stringify({
           ok: false,
           error: "failed to update profile with company",
-          details: profileUpdateErr,
+          details: profileUpdateErr.message || String(profileUpdateErr),
+          code: profileUpdateErr.code,
         }),
         { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
       );
@@ -116,8 +130,6 @@ serve(async (req: Request) => {
       .from("company_invites")
       .update({
         status: "accepted",
-        accepted_by: userId,
-        accepted_at: new Date().toISOString(),
       })
       .eq("id", invite.id);
 
@@ -127,7 +139,8 @@ serve(async (req: Request) => {
         JSON.stringify({
           ok: false,
           error: "failed to update invite status",
-          details: inviteUpdateErr,
+          details: inviteUpdateErr.message || String(inviteUpdateErr),
+          code: inviteUpdateErr.code,
         }),
         { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
       );
@@ -139,10 +152,13 @@ serve(async (req: Request) => {
     );
   } catch (err: any) {
     console.error("accept-invite error:", err);
+    const errorMessage = err?.message ?? String(err);
+    const errorDetails = err?.details || err?.hint || null;
     return new Response(
       JSON.stringify({
         ok: false,
-        error: err?.message ?? String(err),
+        error: errorMessage,
+        details: errorDetails,
       }),
       { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
     );

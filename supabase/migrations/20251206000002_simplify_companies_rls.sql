@@ -13,3 +13,4 @@ CREATE POLICY "Users can create companies"
   WITH CHECK (auth.uid() = created_by);
 
 
+

@@ -191,19 +191,35 @@ useEffect(() => {
   if (!inviteToken) return;
 
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    // Wait for session to be fully established after magic link sign-in
+    // Magic link sign-in happens via URL hash, so we need to wait for it to be processed
+    let session = null;
+    let retries = 0;
+    const maxRetries = 10;
+    
+    while (!session && retries < maxRetries) {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        session = data.session;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+      retries++;
+    }
 
-    if (!session?.user) return;
+    if (!session?.user || !session?.access_token) {
+      console.warn("Session or access token not available after magic link sign-in");
+      // Try again after a longer delay
+      setTimeout(() => handleInviteAcceptanceAfterSignIn(), 2000);
+      return;
+    }
 
     // Validate invite
-    const validateRes = await fetch(
-      `/functions/v1/validate-invite?token=${encodeURIComponent(inviteToken)}`
-    );
-    const validateJson = await validateRes.json();
+    const { data: validateJson, error: validateError } = await supabase.functions.invoke("validate-invite", {
+      body: { token: inviteToken },
+    });
 
-    if (!validateRes.ok || !validateJson?.ok) {
+    if (validateError || !validateJson?.ok) {
       return;
     }
 
@@ -225,12 +241,51 @@ useEffect(() => {
       return;
     }
 
-    // Accept the invite
+    // Accept the invite - supabase.functions.invoke should automatically include auth header
     const { data: acceptJson, error: acceptError } = await supabase.functions.invoke("accept-invite", {
       body: { token: inviteToken, userId: session.user.id },
     });
 
-    if (!acceptError && acceptJson?.ok) {
+    if (acceptError) {
+      console.error("Invite acceptance error:", acceptError);
+      
+      // Try to extract detailed error message from error.context (FunctionsHttpError)
+      let errorMessage = acceptError.message || "Please try again.";
+      
+      if ((acceptError as any).context) {
+        try {
+          const errorContext = (acceptError as any).context;
+          let errorData: any;
+          
+          // error.context might be a Response object or already parsed
+          if (typeof errorContext.json === 'function') {
+            errorData = await errorContext.json();
+          } else if (typeof errorContext === 'object') {
+            errorData = errorContext;
+          }
+          
+          if (errorData?.error) {
+            errorMessage = errorData.error;
+            if (errorData.details) {
+              errorMessage += `: ${errorData.details}`;
+            }
+          } else if (errorData?.message) {
+            errorMessage = errorData.message;
+          }
+        } catch (parseError) {
+          console.warn("Could not parse error context:", parseError);
+        }
+      }
+      
+      toast({
+        title: "Failed to accept invite",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (acceptJson?.ok) {
       toast({
         title: "Invite accepted",
         description: "You have been added to the company. Redirecting to dashboard...",
@@ -247,10 +302,11 @@ useEffect(() => {
         navigate("/dashboard");
       }, 1500);
     } else {
-      console.error("Invite acceptance failed:", acceptJson?.error);
+      console.error("Invite acceptance failed:", acceptJson);
+      const errorMsg = acceptJson?.error || acceptJson?.details || "Please try again.";
       toast({
         title: "Failed to accept invite",
-        description: acceptJson?.error || "Please try again.",
+        description: errorMsg,
         variant: "destructive",
       });
     }

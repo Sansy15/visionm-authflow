@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 interface AppSidebarProps {
   onNavigate?: () => void;
@@ -31,6 +32,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, isAdmin, company, loading: profileLoading } = useProfile();
+  const { toast } = useToast();
   
   // Debug admin status in development (only when profile loading is complete)
   useEffect(() => {
@@ -97,8 +99,18 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
 
   const openProject = (id: string) => navigate(`/dataset/${id}`);
 
-  const handleCreateProject = () => navigate("/dashboard?action=create-project");
-  const handleSimulation = () => navigate("/dashboard");
+  const handleCreateProject = () => {
+    if (!companyId) {
+      toast({
+        title: "Company required",
+        description: "Please create or join a company before creating a project.",
+        variant: "destructive",
+      });
+      return;
+    }
+    navigate("/dashboard?action=create-project");
+  };
+  const handleSimulation = () => navigate("/dashboard?view=simulation");
 
   // When Add User clicked: ensure company exists and fetch access token, then open invite dialog
   const handleAddUser = async () => {
@@ -231,16 +243,36 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
                 {/* Projects submenu */}
                 {item.label === "Projects" && isProjectsExpanded && (
                   <div className="ml-6 mt-1 space-y-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start"
-                      onClick={handleCreateProject}
-                      disabled={!companyId}
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Create Project
-                    </Button>
+                    <div className="relative">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start"
+                        onClick={handleCreateProject}
+                        disabled={!companyId}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Create Project
+                      </Button>
+                      {!companyId && (
+                        <div
+                          className="absolute inset-0 cursor-not-allowed"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toast({
+                              title: "Company required",
+                              description: "Please create or join a company before creating a project.",
+                              variant: "destructive",
+                            });
+                          }}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        />
+                      )}
+                    </div>
 
                     <Button
                       variant="ghost"

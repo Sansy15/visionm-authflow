@@ -1,6 +1,6 @@
 // src/pages/Dashboard.tsx
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,6 +30,8 @@ import { PageHeader } from "@/components/pages/PageHeader";
 import { EmptyState } from "@/components/pages/EmptyState";
 import { LoadingState } from "@/components/pages/LoadingState";
 import { FolderKanban } from "lucide-react";
+import ProfileCompletionDialog from "@/components/ProfileCompletionDialog";
+import { SimulationView } from "@/components/SimulationView";
 
 type ViewMode = "overview" | "projects" | "simulation" | "members";
 
@@ -46,6 +48,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [joinRequestLoading, setJoinRequestLoading] = useState(false);
   const [dialogMode, setDialogMode] = useState<"create" | "join">("create");
+  const [showProfileCompletionDialog, setShowProfileCompletionDialog] = useState(false);
 
   // Company Details Form Validation
   const companyForm = useFormValidation({
@@ -84,6 +87,22 @@ const Dashboard = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionReady, user, searchParams, profileLoading]);
+
+  // Show profile completion dialog for invited users with incomplete profiles
+  useEffect(() => {
+    if (!sessionReady || profileLoading) return;
+    
+    // Only show dialog if user has a company_id (was invited/joined)
+    // AND has an incomplete profile (empty name or phone)
+    if (profile && profile.company_id) {
+      const hasIncompleteName = !profile.name || profile.name.trim() === '';
+      const hasIncompletePhone = !profile.phone || profile.phone.trim() === '';
+      
+      if (hasIncompleteName || hasIncompletePhone) {
+        setShowProfileCompletionDialog(true);
+      }
+    }
+  }, [sessionReady, profileLoading, profile]);
 
   // Handle join request approve/reject from email links
   const handleJoinRequestFromEmail = async (token: string, action: string) => {
@@ -130,10 +149,20 @@ const Dashboard = () => {
     }
   };
 
-  // Handle URL action parameter (e.g., ?action=create-project)
+  // Handle URL action and view parameters
   useEffect(() => {
     const action = searchParams.get("action");
+    const view = searchParams.get("view");
     const token = searchParams.get("token");
+    
+    // Handle view parameter (e.g., ?view=simulation)
+    if (view && ["overview", "projects", "simulation", "members"].includes(view)) {
+      setActiveView(view as ViewMode);
+      // Clear view param from URL after setting
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete("view");
+      setSearchParams(newParams);
+    }
     
     // Handle join request approve/reject from email links
     if (token && (action === "approve" || action === "reject")) {
@@ -146,10 +175,27 @@ const Dashboard = () => {
       return;
     }
     
-    if (action === "create-project" && profile?.company_id) {
-      setShowProjectDialog(true);
-      // Clear the action param from URL
-      setSearchParams({});
+    if (action === "create-project") {
+      if (profile?.company_id) {
+        setShowProjectDialog(true);
+        // Clear the action param from URL
+        setSearchParams({});
+      } else {
+        // User tried to access create-project route without company
+        toast({
+          title: "Company required",
+          description: "Please create or join a company before creating a project.",
+          variant: "destructive",
+        });
+        // Clear the action param and redirect to dashboard
+        const newParams = new URLSearchParams(searchParams);
+        newParams.delete("action");
+        setSearchParams(newParams);
+        // Ensure we're on the dashboard
+        if (location.pathname !== "/dashboard") {
+          navigate("/dashboard", { replace: true });
+        }
+      }
     } else if (action === "join-company") {
       setDialogMode("join");
       setShowCompanyDialog(true);
@@ -948,18 +994,12 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Simulation view (placeholder) */}
+      {/* Simulation view */}
       {activeView === "simulation" && (
-        <div>
-          <h3 className="text-2xl font-semibold mb-2">Simulation</h3>
-          <Card>
-            <CardContent className="py-10">
-              <p className="text-muted-foreground text-sm">
-                Simulation module placeholder.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+        <SimulationView
+          projects={projects}
+          profile={profile}
+        />
       )}
 
       {/* Members view */}
@@ -1096,6 +1136,19 @@ const Dashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Profile Completion Dialog for invited users */}
+      {user && (
+        <ProfileCompletionDialog
+          open={showProfileCompletionDialog}
+          onComplete={() => {
+            setShowProfileCompletionDialog(false);
+            reloadProfile();
+          }}
+          userEmail={user.email || ''}
+          userId={user.id}
+        />
+      )}
     </div>
   );
 };
