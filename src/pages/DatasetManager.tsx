@@ -6,6 +6,7 @@ import { useProfile } from "@/hooks/useProfile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import {
   Card,
   CardContent,
@@ -30,6 +31,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { List, X, Download, FileText, Search, ZoomIn, ZoomOut, RotateCcw, Maximize2, ChevronLeft, ChevronRight, Grid3x3, LayoutGrid, Folder, ChevronRight as ChevronRightIcon, ChevronDown } from "lucide-react";
 import { useBreadcrumbs } from "@/components/app-shell/breadcrumb-context";
+import { cn } from "@/lib/utils";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiUrl = (path: string) => {
@@ -1751,30 +1753,19 @@ const DatasetManager = () => {
         </div>
       </div>
 
-      {/* Progress bar: reflects upload / processing progress.
-          When server percent available, use it. Otherwise fall back to existing upload state visualization. */}
+      {/* Progress bar: reflects upload / processing progress from backend only (no fake percentages) */}
       <div className="w-full max-w-xl mb-4">
-        <div className="h-2 rounded bg-muted overflow-hidden">
-          <div
-            className={`h-2 transition-all ${uploadStatus === "idle" ? "w-0" : "bg-primary"}`}
-            style={{
-              width:
-                uploadStatus === "idle"
-                  ? "0%"
-                  : statusPercent !== null
-                  ? `${statusPercent}%`
-                  : uploadStatus === "uploading"
-                  ? "20%"
-                  : uploadStatus === "processing"
-                  ? "60%"
-                  : uploadStatus === "ready"
-                  ? "100%"
-                  : "100%",
-              backgroundColor:
-                uploadStatus === "ready" ? "#16a34a" /* emerald-500 */ : undefined,
-            }}
+        {uploadStatus !== "idle" && (
+          <Progress
+            value={statusPercent !== null ? Math.min(Math.max(statusPercent, 0), 100) : 100}
+            className="h-2"
+            indicatorClassName={cn(
+              (uploadStatus === "uploading" || uploadStatus === "processing") &&
+                "progress-striped progress-animated",
+              uploadStatus === "ready" && "bg-[hsl(var(--success))]"
+            )}
           />
-        </div>
+        )}
       </div>
 
       {statusProgress && (

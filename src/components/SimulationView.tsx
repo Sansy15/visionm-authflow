@@ -23,6 +23,7 @@ import { Play, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { useProfile } from "@/hooks/useProfile";
+import { cn } from "@/lib/utils";
 import {
   saveTrainingState,
   loadTrainingState,
@@ -120,6 +121,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
   const [hyperparametersSnapshot, setHyperparametersSnapshot] = useState<HyperparametersSnapshot | null>(null);
   const [modelInfo, setModelInfo] = useState<ModelInfoSnapshot | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const [autoScrollLogs, setAutoScrollLogs] = useState<boolean>(true);
   const [trainedModels, setTrainedModels] = useState<TrainedModelSummary[]>([]);
   const [trainedModelsLoading, setTrainedModelsLoading] = useState(false);
   const [trainedModelsError, setTrainedModelsError] = useState<string | null>(null);
@@ -127,11 +129,13 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
 
   // refs
   const pollIntervalRef = useRef<number | null>(null);
+  const logsPollIntervalRef = useRef<number | null>(null);
   const logsAbortRef = useRef<AbortController | null>(null);
   const datasetDetailsAbortRef = useRef<AbortController | null>(null);
   const isRestoringRef = useRef<boolean>(false);
   const hasRestoredRef = useRef<boolean>(false);
   const completionToastShownRef = useRef<boolean>(false);
+  const logsContainerRef = useRef<HTMLDivElement | null>(null);
 
   const COMPLETION_TOAST_PREFIX = "visionm_training_completed_toast_";
 
@@ -745,6 +749,10 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
         window.clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
       }
+      if (logsPollIntervalRef.current) {
+        window.clearInterval(logsPollIntervalRef.current);
+        logsPollIntervalRef.current = null;
+      }
       if (logsAbortRef.current) {
         logsAbortRef.current.abort();
         logsAbortRef.current = null;
@@ -755,6 +763,14 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
       }
     };
   }, []);
+
+  // --- auto-scroll logs to bottom while user is near the bottom ---
+  useEffect(() => {
+    if (!autoScrollLogs) return;
+    const el = logsContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logs, autoScrollLogs]);
 
   // --- start training: POST /api/train ---
   const startTraining = async () => {
@@ -852,6 +868,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
       });
       
       startPollingJob(newJobId);
+      startLogsPolling(newJobId);
     } catch (err: any) {
       console.error("startTraining error:", err);
       toast({
@@ -888,6 +905,10 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
             if (pollIntervalRef.current) {
               window.clearInterval(pollIntervalRef.current);
               pollIntervalRef.current = null;
+            }
+            if (logsPollIntervalRef.current) {
+              window.clearInterval(logsPollIntervalRef.current);
+              logsPollIntervalRef.current = null;
             }
             setIsSimulating(false);
             setJobId(null);
@@ -967,6 +988,10 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
             window.clearInterval(pollIntervalRef.current);
             pollIntervalRef.current = null;
           }
+          if (logsPollIntervalRef.current) {
+            window.clearInterval(logsPollIntervalRef.current);
+            logsPollIntervalRef.current = null;
+          }
           setIsSimulating(false);
           if (status === "completed") {
             showCompletionToast(jobIdToPoll, data.finalMetrics as FinalMetrics | null | undefined);
@@ -991,6 +1016,10 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
             window.clearInterval(pollIntervalRef.current);
             pollIntervalRef.current = null;
           }
+          if (logsPollIntervalRef.current) {
+            window.clearInterval(logsPollIntervalRef.current);
+            logsPollIntervalRef.current = null;
+          }
           setIsSimulating(false);
           setJobId(null);
           setSimulationStatus("idle");
@@ -1007,9 +1036,9 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
     pollIntervalRef.current = id as unknown as number;
   };
 
-  // --- fetch logs on demand ---
-  const fetchLogs = async (limit = 200) => {
-    if (!jobId) return;
+  // --- fetch logs for a specific job (used by logs polling) ---
+  const fetchLogsForJob = async (jobIdToPoll: string, limit = 200, silent = true) => {
+    if (!jobIdToPoll) return;
     if (logsAbortRef.current) {
       logsAbortRef.current.abort();
       logsAbortRef.current = null;
@@ -1017,7 +1046,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
     const abort = new AbortController();
     logsAbortRef.current = abort;
     try {
-      const resp = await fetch(`${API_BASE}/train/${encodeURIComponent(jobId)}/logs?limit=${limit}`, {
+      const resp = await fetch(`${API_BASE}/train/${encodeURIComponent(jobIdToPoll)}/logs?limit=${limit}`, {
         headers: getFetchHeaders(),
         signal: abort.signal,
       });
@@ -1027,14 +1056,33 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
     } catch (err: any) {
       if (err?.name === "AbortError") return;
       console.error("fetchLogs error:", err);
-      toast({
-        title: "Failed to load logs",
-        description: err?.message ?? "Could not fetch training logs.",
-        variant: "destructive",
-      });
+      if (!silent) {
+        toast({
+          title: "Failed to load logs",
+          description: err?.message ?? "Could not fetch training logs.",
+          variant: "destructive",
+        });
+      }
     } finally {
       logsAbortRef.current = null;
     }
+  };
+
+  // --- poll logs every 2–3s while training is active ---
+  const startLogsPolling = (jobIdToPoll: string, intervalMs = 3000) => {
+    if (!jobIdToPoll) return;
+    if (logsPollIntervalRef.current) {
+      window.clearInterval(logsPollIntervalRef.current);
+      logsPollIntervalRef.current = null;
+    }
+
+    const tick = () => {
+      void fetchLogsForJob(jobIdToPoll, 200, true);
+    };
+
+    tick(); // initial fetch immediately
+    const id = window.setInterval(tick, intervalMs);
+    logsPollIntervalRef.current = id as unknown as number;
   };
 
   // cancel job
@@ -1054,6 +1102,10 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
       if (pollIntervalRef.current) {
         window.clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
+      }
+      if (logsPollIntervalRef.current) {
+        window.clearInterval(logsPollIntervalRef.current);
+        logsPollIntervalRef.current = null;
       }
       setIsSimulating(false);
       // Clear persisted training state when cancelled
@@ -1089,6 +1141,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
       });
       
       startPollingJob(newId);
+      startLogsPolling(newId);
       toast({ title: "Retry started", description: `New job ${newId} started`, variant: "default" });
     } catch (err: any) {
       console.error("retryJob error:", err);
@@ -1684,7 +1737,15 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
                 )}
               </div>
 
-              <Progress value={simulationProgress} />
+              <Progress
+                value={simulationProgress}
+                indicatorClassName={cn(
+                  ["queued", "running"].includes(simulationStatus) &&
+                    "progress-striped progress-animated",
+                  simulationStatus === "completed" && "bg-[hsl(var(--success))]",
+                  simulationStatus === "failed" && "bg-[hsl(var(--destructive))]"
+                )}
+              />
               <div className="flex items-center justify-between text-sm mt-2">
                 <span className="text-muted-foreground">Progress</span>
                 <span className="font-medium">{simulationProgress}%</span>
@@ -1861,18 +1922,23 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
                 </div>
               )}
 
-              {/* logs preview */}
+              {/* logs preview - auto-refreshed and auto-scrolling while user is at bottom */}
               <div className="mt-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">Logs</div>
-                  <div>
-                    <Button size="sm" variant="outline" onClick={() => void fetchLogs(200)}>
-                      Refresh logs
-                    </Button>
-                  </div>
-                </div>
-                <div className="mt-2 max-h-40 overflow-auto bg-surface p-2 rounded text-xs">
-                  {logs.length === 0 ? <div className="text-muted-foreground">No logs yet.</div> : logs.map((l, i) => <div key={i}>{l}</div>)}
+                <div className="text-sm text-muted-foreground">Logs</div>
+                <div
+                  ref={logsContainerRef}
+                  className="mt-2 max-h-40 overflow-auto bg-surface p-2 rounded text-xs"
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    const isNearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 10;
+                    setAutoScrollLogs(isNearBottom);
+                  }}
+                >
+                  {logs.length === 0 ? (
+                    <div className="text-muted-foreground">No logs yet.</div>
+                  ) : (
+                    logs.map((l, i) => <div key={i}>{l}</div>)
+                  )}
                 </div>
               </div>
 

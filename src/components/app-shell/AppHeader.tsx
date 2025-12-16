@@ -20,9 +20,9 @@ export const AppHeader: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isMobile = useIsMobile();
 
-  // Debug admin status in development (only when profile loading is complete)
+  // Debug admin status in development (only when session is fully initialized)
   useEffect(() => {
-    if (import.meta.env.DEV && loading !== undefined && !loading) {
+    if (import.meta.env.DEV && sessionReady && !loading) {
       console.log("[AppHeader] Admin Status Check:", {
         hasProfile: !!profile,
         hasCompany: !!company,
@@ -120,7 +120,7 @@ export const AppHeader: React.FC = () => {
             )}
 
             {/* Notification Bell Icon - Admin Only */}
-            {isAdmin && profile?.email && (
+            {sessionReady && !loading && isAdmin && profile?.email && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -147,7 +147,7 @@ export const AppHeader: React.FC = () => {
       </header>
 
       {/* Join Requests Side Panel - Admin Only */}
-      {isAdmin && profile?.email && (
+      {sessionReady && !loading && isAdmin && profile?.email && (
         <JoinRequestsSidePanel
           open={showRequestsPanel}
           onOpenChange={setShowRequestsPanel}

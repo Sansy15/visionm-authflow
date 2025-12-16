@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { AppHeader } from "./AppHeader";
@@ -13,6 +13,9 @@ const AppShellContent = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { sessionReady, user, error } = useProfile();
+  const lastActiveRef = useRef<number>(Date.now());
+  const hasRefreshedAfterIdleRef = useRef(false);
+  const INACTIVITY_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
   // Handle navigation on sign out (ProfileContext handles state clearing)
   useEffect(() => {
@@ -43,19 +46,30 @@ const AppShellContent = () => {
   // Restore route after session is ready and user is authenticated
   useRoutePersistence(sessionReady, user);
 
-  // Handle visibility changes to prevent unnecessary refreshes
+  // Track inactivity and perform a single controlled refresh after long idle
   useEffect(() => {
     const handleVisibilityChange = () => {
-      // Only log, don't trigger any refreshes or reloads
-      if (document.visibilityState === 'visible') {
-        // Tab became visible - but don't do anything that could cause refresh
-        // The app should continue normally without any forced reloads
+      const now = Date.now();
+
+      if (document.visibilityState === "hidden") {
+        lastActiveRef.current = now;
+        return;
+      }
+
+      if (document.visibilityState === "visible") {
+        const idleDuration = now - lastActiveRef.current;
+
+        if (idleDuration >= INACTIVITY_THRESHOLD_MS && !hasRefreshedAfterIdleRef.current) {
+          hasRefreshedAfterIdleRef.current = true;
+          // Let existing persistence mechanisms (route, training state) handle restoration
+          window.location.reload();
+        }
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 

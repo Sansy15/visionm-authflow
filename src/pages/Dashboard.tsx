@@ -32,6 +32,7 @@ import { LoadingState } from "@/components/pages/LoadingState";
 import { FolderKanban } from "lucide-react";
 import ProfileCompletionDialog from "@/components/ProfileCompletionDialog";
 import { SimulationView } from "@/components/SimulationView";
+import { useBreadcrumbs } from "@/components/app-shell/breadcrumb-context";
 
 type ViewMode = "overview" | "projects" | "simulation" | "members";
 
@@ -49,6 +50,7 @@ const Dashboard = () => {
   const [joinRequestLoading, setJoinRequestLoading] = useState(false);
   const [dialogMode, setDialogMode] = useState<"create" | "join">("create");
   const [showProfileCompletionDialog, setShowProfileCompletionDialog] = useState(false);
+  const { setItems: setBreadcrumbs } = useBreadcrumbs();
 
   // Company Details Form Validation
   const companyForm = useFormValidation({
@@ -77,6 +79,31 @@ const Dashboard = () => {
 
   // Auth check is handled by ProfileContext and AppShell
   // No need for redundant checks here
+
+  // Keep breadcrumbs in sync with the current dashboard view
+  useEffect(() => {
+    if (activeView === "simulation") {
+      setBreadcrumbs([
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Projects", href: "/dashboard/projects" },
+        { label: "Simulation" },
+      ]);
+    } else if (activeView === "projects") {
+      setBreadcrumbs([
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Projects", href: "/dashboard/projects" },
+      ]);
+    } else {
+      // Default: just show Dashboard
+      setBreadcrumbs([
+        { label: "Dashboard", href: "/dashboard" },
+      ]);
+    }
+
+    return () => {
+      setBreadcrumbs(null);
+    };
+  }, [activeView, setBreadcrumbs]);
 
   // Handle invite token from URL (only after session is ready)
   useEffect(() => {
@@ -932,10 +959,12 @@ const Dashboard = () => {
 
   return (
     <div>
-      <PageHeader
-        title={`Welcome, ${displayName}`}
-        description="Manage your projects, datasets, and simulation workspace from this dashboard."
-      />
+      {activeView !== "simulation" && (
+        <PageHeader
+          title={`Welcome, ${displayName}`}
+          description="Manage your projects, datasets, and simulation workspace from this dashboard."
+        />
+      )}
 
       {/* CONTENT: Overview placeholder (default) */}
       {activeView === "overview" && !profile?.company_id && (

@@ -6,6 +6,41 @@
 All colors MUST be HSL.
 */
 
+/* Bootstrap-like striped & animated progress bar helpers */
+@layer components {
+  .progress-striped {
+    /* Base bar color */
+    background-color: hsl(var(--primary));
+    /* High-contrast diagonal stripes, Bootstrap-like */
+    background-image: linear-gradient(
+      45deg,
+      hsla(0 0% 100% / 0.25) 25%,
+      transparent 25%,
+      transparent 50%,
+      hsla(0 0% 100% / 0.25) 50%,
+      hsla(0 0% 100% / 0.25) 75%,
+      transparent 75%,
+      transparent
+    );
+    background-size: 1rem 1rem;
+  }
+
+  .progress-animated {
+    /* Bootstrap-style continuous stripe movement */
+    animation: progress-bar-stripes 1s linear infinite;
+  }
+}
+
+/* Based on https://makc3d.wordpress.com/2015/03/07/animated-bootstrap-progress-bar/ */
+@keyframes progress-bar-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 40px 0;
+  }
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
