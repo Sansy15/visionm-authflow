@@ -20,6 +20,7 @@ import {
   Plus,
   FileText,
   Cpu,
+  BrainCircuit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -112,6 +113,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
     navigate("/dashboard?action=create-project");
   };
   const handleSimulation = () => navigate("/dashboard?view=simulation");
+  const handlePrediction = () => navigate("/project/prediction");
 
   // When Add User clicked: ensure company exists and fetch access token, then open invite dialog
   const handleAddUser = async () => {
@@ -336,6 +338,19 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
                     >
                       <Cpu className="mr-2 h-4 w-4" />
                       Simulation
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={cn(
+                        "w-full justify-start",
+                        location.pathname === "/project/prediction" && "bg-secondary"
+                      )}
+                      onClick={handlePrediction}
+                    >
+                      <BrainCircuit className="mr-2 h-4 w-4" />
+                      Prediction (Testing)
                     </Button>
 
                     {isAdmin && companyId && (

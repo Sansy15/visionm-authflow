@@ -24,6 +24,7 @@ import { AccountPage } from "@/pages/AccountPage";
 import { AccountProfilePage } from "@/pages/AccountProfilePage";
 import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
 import { AccountPreferencesPage } from "@/pages/AccountPreferencesPage";
+import PredictionPage from "@/pages/PredictionPage";
 
 // Protected routes component - gates routes behind authentication
 const ProtectedRoutes = () => {
@@ -61,6 +62,9 @@ const ProtectedRoutes = () => {
         
         {/* Projects */}
         <Route path="/dashboard/projects" element={<ProjectsPage />} />
+        
+        {/* Prediction */}
+        <Route path="/project/prediction" element={<PredictionPage />} />
         
         {/* Team */}
         <Route path="/dashboard/team" element={<TeamMembersPage />} />
