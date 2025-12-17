@@ -22,9 +22,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { BrainCircuit, Play, Loader2, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { BrainCircuit, Play, Loader2, CheckCircle2, XCircle, Clock, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiUrl = (path: string) => {
@@ -34,20 +50,24 @@ const apiUrl = (path: string) => {
 };
 
 interface Dataset {
-  _id: string;
-  id?: string;
+  datasetId: string; // MongoDB _id from backend
+  _id?: string; // Fallback for compatibility
+  id?: string; // Fallback for compatibility
   version?: string;
   testCount?: number;
   totalImages?: number;
   createdAt?: string;
   status?: string;
+  company?: string;
+  project?: string;
 }
 
 interface Model {
-  _id: string;
-  modelId?: string;
+  modelId: string; // MongoDB _id from backend
+  _id?: string; // Fallback for compatibility
   modelVersion?: string;
   modelType?: string;
+  name?: string;
   metrics?: {
     mAP50?: number;
     precision?: number;
@@ -57,30 +77,82 @@ interface Model {
 }
 
 interface InferenceStatus {
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
-  progress?: number;
-  processedImages?: number;
-  totalImages?: number;
+  inferenceId?: string;
+  status: "idle" | "queued" | "running" | "completed" | "failed" | "cancelled";
+  progress?: {
+    totalImages?: number;
+    processedImages?: number;
+    progressPercent?: number;
+  } | number; // Support both nested (backend) and flat (legacy)
+  processedImages?: number; // Legacy flat structure
+  totalImages?: number; // Legacy flat structure
   message?: string;
+  startedAt?: string;
+  completedAt?: string | null;
+  error?: string | null;
 }
 
 interface InferenceResults {
+  // Backend returns nested structure: { results: { ... } }
+  // This interface represents the inner results object
   totalDetections: number;
   averageConfidence: number;
   detectionsByClass: Array<{
     className: string;
     count: number;
-    averageConfidence: number;
+    avgConfidence?: number; // Backend uses "avgConfidence"
+    averageConfidence?: number; // Fallback
   }>;
   annotatedImages: Array<{
     filename: string;
     url: string;
-    detections: Array<{
+    detections?: Array<{
       className: string;
       confidence: number;
       bbox?: number[];
     }>;
   }>;
+}
+
+interface InferenceJob {
+  inferenceId: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  sourceType?: string;
+  progress?: {
+    totalImages?: number;
+    processedImages?: number;
+    progressPercent?: number;
+  };
+  model?: {
+    modelId: string;
+    modelVersion?: string;
+    modelType?: string;
+    metrics?: {
+      mAP50?: number;
+      precision?: number;
+      recall?: number;
+    };
+  };
+  dataset?: {
+    datasetId: string;
+    version?: string;
+    testCount?: number;
+  };
+  results?: {
+    totalDetections?: number;
+    averageConfidence?: number;
+    detectionsByClass?: Array<{
+      className: string;
+      count: number;
+      avgConfidence?: number;
+    }>;
+    hasAnnotatedImages?: boolean;
+  };
+  startedAt?: string;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 const STORAGE_PREFIX = "prediction_";
@@ -99,7 +171,7 @@ const PredictionPage = () => {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.25);
   const [inferenceId, setInferenceId] = useState<string | null>(null);
-  const [inferenceStatus, setInferenceStatus] = useState<InferenceStatus["status"]>("idle");
+  const [inferenceStatus, setInferenceStatus] = useState<"idle" | "queued" | "running" | "completed" | "failed" | "cancelled">("idle");
   const [inferenceProgress, setInferenceProgress] = useState<number>(0);
   const [processedImages, setProcessedImages] = useState<number>(0);
   const [totalImages, setTotalImages] = useState<number>(0);
@@ -110,6 +182,16 @@ const PredictionPage = () => {
   const [loadingModels, setLoadingModels] = useState(false);
   const [startingInference, setStartingInference] = useState(false);
   const [loadingResults, setLoadingResults] = useState(false);
+  const [cancellingInference, setCancellingInference] = useState(false);
+  const [deletingInference, setDeletingInference] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  
+  // History view state
+  const [viewMode, setViewMode] = useState<"new" | "history">("new");
+  const [pastInferences, setPastInferences] = useState<InferenceJob[]>([]);
+  const [loadingPastInferences, setLoadingPastInferences] = useState(false);
+  const [selectedPastInferenceId, setSelectedPastInferenceId] = useState<string | null>(null);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<string>("all");
 
   // Refs
   const pollIntervalRef = useRef<number | null>(null);
@@ -281,7 +363,7 @@ const PredictionPage = () => {
       setSelectedDatasetId((currentId) => {
         if (currentId) {
           const datasetExists = datasetsList.some(
-            (d) => d._id === currentId || d.id === currentId
+            (d) => d.datasetId === currentId || d._id === currentId || d.id === currentId
           );
           if (!datasetExists) {
             saveToStorage("datasetId", null);
@@ -336,7 +418,7 @@ const PredictionPage = () => {
       setSelectedModelId((currentId) => {
         if (currentId) {
           const modelExists = modelsList.some(
-            (m) => m._id === currentId || m.modelId === currentId
+            (m) => m.modelId === currentId || m._id === currentId
           );
           if (!modelExists) {
             saveToStorage("modelId", null);
@@ -418,9 +500,27 @@ const PredictionPage = () => {
       const data: InferenceStatus = await res.json();
       setInferenceStatus(data.status);
       
+      // Handle nested progress structure from backend
       if (data.progress !== undefined) {
-        setInferenceProgress(data.progress);
+        if (typeof data.progress === "object" && data.progress !== null) {
+          // Backend nested structure: { progress: { totalImages, processedImages, progressPercent } }
+          const progressObj = data.progress as { totalImages?: number; processedImages?: number; progressPercent?: number };
+          if (progressObj.progressPercent !== undefined) {
+            setInferenceProgress(progressObj.progressPercent);
+          }
+          if (progressObj.processedImages !== undefined) {
+            setProcessedImages(progressObj.processedImages);
+          }
+          if (progressObj.totalImages !== undefined) {
+            setTotalImages(progressObj.totalImages);
+          }
+        } else if (typeof data.progress === "number") {
+          // Legacy flat structure
+          setInferenceProgress(data.progress);
+        }
       }
+      
+      // Fallback to top-level fields (legacy support)
       if (data.processedImages !== undefined) {
         setProcessedImages(data.processedImages);
       }
@@ -429,10 +529,15 @@ const PredictionPage = () => {
       }
 
       // Save state
+      const progressValue = typeof data.progress === "object" && data.progress !== null
+        ? (data.progress as { progressPercent?: number }).progressPercent ?? 0
+        : (typeof data.progress === "number" ? data.progress : 0);
+      const processedValue = data.processedImages ?? (typeof data.progress === "object" && data.progress !== null ? (data.progress as { processedImages?: number }).processedImages ?? 0 : 0);
+      const totalValue = data.totalImages ?? (typeof data.progress === "object" && data.progress !== null ? (data.progress as { totalImages?: number }).totalImages ?? 0 : 0);
       saveToStorage("status", data.status);
-      saveToStorage("progress", data.progress ?? 0);
-      saveToStorage("processedImages", data.processedImages ?? 0);
-      saveToStorage("totalImages", data.totalImages ?? 0);
+      saveToStorage("progress", progressValue);
+      saveToStorage("processedImages", processedValue);
+      saveToStorage("totalImages", totalValue);
 
       // Stop polling if completed/failed/cancelled
       if (["completed", "failed", "cancelled"].includes(data.status)) {
@@ -476,6 +581,223 @@ const PredictionPage = () => {
     pollIntervalRef.current = interval as unknown as number;
   };
 
+  // Cancel inference
+  const cancelInference = async () => {
+    if (!inferenceId) return;
+
+    setCancellingInference(true);
+    try {
+      const headers = await getAuthHeaders();
+      const url = apiUrl(`/inference/${encodeURIComponent(inferenceId)}/cancel`);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.error || `Failed to cancel inference: ${res.status}`;
+
+        // Handle specific error cases
+        if (res.status === 400) {
+          toast({
+            title: "Cannot cancel",
+            description: errorMessage,
+            variant: "destructive",
+          });
+        } else if (res.status === 404) {
+          toast({
+            title: "Inference not found",
+            description: "The inference job was not found.",
+            variant: "destructive",
+          });
+          // Clear invalid inference ID
+          setInferenceId(null);
+          setInferenceStatus("idle");
+          clearStorage();
+        } else {
+          throw new Error(errorMessage);
+        }
+        return;
+      }
+
+      const data = await res.json();
+
+      // Stop polling immediately
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+
+      // Update status to cancelled
+      setInferenceStatus("cancelled");
+
+      // Clear persisted state
+      setInferenceId(null);
+      clearStorage();
+
+      toast({
+        title: "Inference cancelled",
+        description: data.message || "Inference job cancelled successfully.",
+      });
+    } catch (err: any) {
+      console.error("Error cancelling inference:", err);
+      toast({
+        title: "Cancel failed",
+        description: err?.message || "Could not cancel inference.",
+        variant: "destructive",
+      });
+    } finally {
+      setCancellingInference(false);
+    }
+  };
+
+  // Delete inference
+  const deleteInference = async () => {
+    if (!inferenceId) return;
+
+    setDeletingInference(true);
+    try {
+      const headers = await getAuthHeaders();
+      const url = apiUrl(`/inference/${encodeURIComponent(inferenceId)}`);
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.error || `Failed to delete inference: ${res.status}`;
+
+        // Handle specific error cases
+        if (res.status === 400) {
+          toast({
+            title: "Cannot delete",
+            description: errorData.message || "Cannot delete a running or queued job. Please cancel it first.",
+            variant: "destructive",
+          });
+        } else if (res.status === 404) {
+          toast({
+            title: "Inference not found",
+            description: "The inference job was not found. It may have already been deleted.",
+            variant: "destructive",
+          });
+          // Clear invalid inference ID
+          setInferenceId(null);
+          setInferenceStatus("idle");
+          clearStorage();
+        } else {
+          throw new Error(errorMessage);
+        }
+        return;
+      }
+
+      const data = await res.json();
+
+      // Clear all inference-related state
+      setInferenceId(null);
+      setInferenceStatus("idle");
+      setInferenceProgress(0);
+      setProcessedImages(0);
+      setTotalImages(0);
+      setResults(null);
+      clearStorage();
+
+      toast({
+        title: "Inference deleted",
+        description: data.message || "Inference job and results deleted successfully.",
+      });
+
+      // Refresh history list if in history view
+      if (viewMode === "history") {
+        void fetchPastInferences();
+      }
+
+      // Scroll to top to show configuration section
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err: any) {
+      console.error("Error deleting inference:", err);
+      toast({
+        title: "Delete failed",
+        description: err?.message || "Could not delete inference.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingInference(false);
+      setShowDeleteDialog(false);
+    }
+  };
+
+  // Fetch past inference jobs
+  const fetchPastInferences = useCallback(async () => {
+    if (!companyName || !projectName || !sessionReady || !selectedProjectId) {
+      setPastInferences([]);
+      return;
+    }
+
+    setLoadingPastInferences(true);
+    try {
+      const headers = await getAuthHeaders();
+      const qs = new URLSearchParams({
+        company: companyName,
+        project: projectName,
+      });
+      if (historyStatusFilter && historyStatusFilter !== "all") {
+        qs.append("status", historyStatusFilter);
+      }
+      const url = apiUrl(`/inference?${qs.toString()}`);
+      const res = await fetch(url, { headers });
+
+      if (!res.ok) {
+        if (res.status !== 404) {
+          console.error("Failed to fetch past inferences:", res.status);
+        }
+        setPastInferences([]);
+        return;
+      }
+
+      const json = await res.json();
+      const jobsList = Array.isArray(json.inferenceJobs) ? json.inferenceJobs : (json.inferenceJobs || []);
+      setPastInferences(jobsList);
+    } catch (err) {
+      console.error("Error fetching past inferences:", err);
+      setPastInferences([]);
+    } finally {
+      setLoadingPastInferences(false);
+    }
+  }, [companyName, projectName, sessionReady, selectedProjectId, historyStatusFilter]);
+
+  // Fetch past inferences when in history view and project is selected
+  useEffect(() => {
+    if (viewMode === "history" && sessionReady && companyName && projectName && selectedProjectId) {
+      void fetchPastInferences();
+    }
+  }, [viewMode, sessionReady, companyName, projectName, selectedProjectId, historyStatusFilter, fetchPastInferences]);
+
+  // Load results for a selected past inference
+  const loadPastInferenceResults = async (inferenceId: string) => {
+    setSelectedPastInferenceId(inferenceId);
+    setInferenceId(inferenceId);
+    setInferenceStatus("completed");
+    
+    // Fetch results
+    await fetchResults(inferenceId);
+    
+    // Switch to new view to show results
+    setViewMode("new");
+    
+    // Scroll to results section
+    setTimeout(() => {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    }, 100);
+  };
+
   // Fetch results
   const fetchResults = async (id: string) => {
     setLoadingResults(true);
@@ -495,8 +817,40 @@ const PredictionPage = () => {
         return;
       }
 
-      const data: InferenceResults = await res.json();
-      setResults(data);
+      const response = await res.json();
+      // Backend returns nested structure: { results: { ... } }
+      // Extract the inner results object
+      const data: InferenceResults = response.results || response;
+
+      // Normalize detectionsByClass to use consistent field names
+      // and ensure annotatedImages always have a usable URL
+      const normalizedData: InferenceResults = {
+        ...data,
+        detectionsByClass:
+          data.detectionsByClass?.map((item) => ({
+            ...item,
+            averageConfidence: item.avgConfidence ?? item.averageConfidence ?? 0,
+          })) || [],
+        annotatedImages:
+          data.annotatedImages?.map((img) => {
+            // If backend provided a URL starting with "/api/", strip the leading "/api"
+            // before passing to apiUrl, because API_BASE_URL already includes "/api".
+            const rawPath =
+              img.url && img.url.startsWith("/api/")
+                ? img.url.slice(4) // remove leading "/api"
+                : img.url ||
+                  `/inference/${encodeURIComponent(id)}/image/${encodeURIComponent(
+                    img.filename,
+                  )}`;
+
+            return {
+              ...img,
+              url: apiUrl(rawPath),
+            };
+          }) || [],
+      };
+
+      setResults(normalizedData);
     } catch (err: any) {
       console.error("Error fetching results:", err);
       toast({
@@ -601,6 +955,49 @@ const PredictionPage = () => {
     };
   }, []);
 
+  // Get status badge for inference job
+  const getStatusBadgeForJob = (status: string) => {
+    switch (status) {
+      case "queued":
+        return (
+          <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+            <Clock className="mr-1 h-3 w-3" />
+            Queued
+          </Badge>
+        );
+      case "running":
+        return (
+          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            Running
+          </Badge>
+        );
+      case "completed":
+        return (
+          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+            <CheckCircle2 className="mr-1 h-3 w-3" />
+            Completed
+          </Badge>
+        );
+      case "failed":
+        return (
+          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+            <XCircle className="mr-1 h-3 w-3" />
+            Failed
+          </Badge>
+        );
+      case "cancelled":
+        return (
+          <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
+            <XCircle className="mr-1 h-3 w-3" />
+            Cancelled
+          </Badge>
+        );
+      default:
+        return null;
+    }
+  };
+
   // Get status badge
   const getStatusBadge = () => {
     switch (inferenceStatus) {
@@ -644,8 +1041,8 @@ const PredictionPage = () => {
     }
   };
 
-  const selectedDataset = datasets.find((d) => d._id === selectedDatasetId || d.id === selectedDatasetId);
-  const selectedModel = models.find((m) => m._id === selectedModelId || m.modelId === selectedModelId);
+  const selectedDataset = datasets.find((d) => d.datasetId === selectedDatasetId || d._id === selectedDatasetId || d.id === selectedDatasetId);
+  const selectedModel = models.find((m) => m.modelId === selectedModelId || m._id === selectedModelId);
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -654,47 +1051,56 @@ const PredictionPage = () => {
         description="Test and evaluate your trained models with new data"
       />
 
-      {/* Project Selection */}
-      {inferenceStatus === "idle" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Select Project</CardTitle>
-            <CardDescription>Choose project scope for datasets and models</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Select value={selectedProjectId} onValueChange={handleProjectSelect} disabled={loadingProjects}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a project" />
-              </SelectTrigger>
-              <SelectContent>
-                {loadingProjects ? (
-                  <SelectItem value="loading" disabled>
-                    Loading projects...
-                  </SelectItem>
-                ) : projects.length === 0 ? (
-                  <SelectItem value="no-projects" disabled>
-                    No projects available
-                  </SelectItem>
-                ) : (
-                  projects.map((project) => (
-                    <SelectItem key={String(project.id)} value={String(project.id)}>
-                      {project.name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-            {!selectedProjectId && (
-              <p className="text-sm text-muted-foreground mt-2">
-                Select a project to continue
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* Tabs for New Inference and History */}
+      <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "new" | "history")}>
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="new">New Inference</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
+        </TabsList>
 
-      {/* Configuration Section */}
-      {inferenceStatus === "idle" && selectedProjectId && (
+        {/* Project Selection */}
+        {(inferenceStatus === "idle" || viewMode === "history") && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Select Project</CardTitle>
+              <CardDescription>Choose project scope for datasets and models</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Select value={selectedProjectId} onValueChange={handleProjectSelect} disabled={loadingProjects}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {loadingProjects ? (
+                    <SelectItem value="loading" disabled>
+                      Loading projects...
+                    </SelectItem>
+                  ) : projects.length === 0 ? (
+                    <SelectItem value="no-projects" disabled>
+                      No projects available
+                    </SelectItem>
+                  ) : (
+                    projects.map((project) => (
+                      <SelectItem key={String(project.id)} value={String(project.id)}>
+                        {project.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {!selectedProjectId && (
+                <p className="text-sm text-muted-foreground mt-2">
+                  Select a project to continue
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* New Inference Tab */}
+        <TabsContent value="new" className="space-y-6">
+          {/* Configuration Section */}
+          {inferenceStatus === "idle" && selectedProjectId && (
         <div className="grid gap-6 md:grid-cols-2">
           {/* Dataset Selection */}
           <Card>
@@ -713,13 +1119,14 @@ const PredictionPage = () => {
                 </p>
               ) : (
                 <div className="space-y-2 max-h-60 overflow-auto">
-                  {datasets.map((dataset) => {
-                    const isSelected =
-                      dataset._id === selectedDatasetId || dataset.id === selectedDatasetId;
+                  {datasets.map((dataset, idx) => {
+                    const datasetId = dataset.datasetId || dataset._id || dataset.id || "";
+                    const isSelected = datasetId === selectedDatasetId;
+                    const datasetKey = datasetId || `dataset-${idx}`;
                     return (
                       <button
-                        key={dataset._id || dataset.id}
-                        onClick={() => handleDatasetSelect(dataset._id || dataset.id || "")}
+                        key={datasetKey}
+                        onClick={() => handleDatasetSelect(datasetId)}
                         className={cn(
                           "w-full text-left p-3 rounded-md border transition-colors",
                           isSelected
@@ -761,13 +1168,14 @@ const PredictionPage = () => {
                 </p>
               ) : (
                 <div className="space-y-2 max-h-60 overflow-auto">
-                  {models.map((model) => {
-                    const isSelected =
-                      model._id === selectedModelId || model.modelId === selectedModelId;
+                  {models.map((model, idx) => {
+                    const modelId = model.modelId || model._id || "";
+                    const isSelected = modelId === selectedModelId;
+                    const modelKey = modelId || `model-${idx}`;
                     return (
                       <button
-                        key={model._id || model.modelId}
-                        onClick={() => handleModelSelect(model._id || model.modelId || "")}
+                        key={modelKey}
+                        onClick={() => handleModelSelect(modelId)}
                         className={cn(
                           "w-full text-left p-3 rounded-md border transition-colors",
                           isSelected
@@ -776,7 +1184,7 @@ const PredictionPage = () => {
                         )}
                       >
                         <div className="font-medium">
-                          {model.modelVersion || model.modelId || "Unnamed Model"}
+                          {model.name || model.modelVersion || model.modelId || "Unnamed Model"}
                         </div>
                         {model.metrics && (
                           <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
@@ -858,13 +1266,37 @@ const PredictionPage = () => {
         </Card>
       )}
 
-      {/* Progress Section */}
-      {inferenceStatus !== "idle" && (
+      {/* Progress Section - only in New Inference view */}
+      {viewMode === "new" && inferenceStatus !== "idle" && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Inference Progress</CardTitle>
-              {getStatusBadge()}
+              <div className="flex items-center gap-2">
+                {getStatusBadge()}
+                {/* Cancel Button - Show only when queued or running */}
+                {(inferenceStatus === "queued" || inferenceStatus === "running") && (
+                  <Button
+                    onClick={cancelInference}
+                    variant="outline"
+                    size="sm"
+                    disabled={cancellingInference}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    {cancellingInference ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Cancelling...
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Cancel
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
             <CardDescription>
               {selectedDataset && `Dataset: ${selectedDataset.version || "Unversioned"}`}
@@ -912,8 +1344,8 @@ const PredictionPage = () => {
         </Card>
       )}
 
-      {/* Results Section */}
-      {inferenceStatus === "completed" && (
+          {/* Results Section */}
+          {inferenceStatus === "completed" && (
         <>
           {loadingResults ? (
             <Card>
@@ -925,6 +1357,34 @@ const PredictionPage = () => {
             </Card>
           ) : results ? (
             <>
+              {/* Action Buttons - Above Results Summary */}
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  onClick={() => {
+                    setInferenceId(null);
+                    setInferenceStatus("idle");
+                    setInferenceProgress(0);
+                    setProcessedImages(0);
+                    setTotalImages(0);
+                    setResults(null);
+                    clearStorage();
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  variant="outline"
+                >
+                  <Play className="mr-2 h-4 w-4" />
+                  Start New Inference
+                </Button>
+                <Button
+                  onClick={() => setShowDeleteDialog(true)}
+                  variant="outline"
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete Results
+                </Button>
+              </div>
+
               {/* Summary */}
               <Card>
                 <CardHeader>
@@ -970,7 +1430,7 @@ const PredictionPage = () => {
                         </thead>
                         <tbody>
                           {results.detectionsByClass.map((item, idx) => (
-                            <tr key={idx} className="border-b">
+                            <tr key={item.className || `class-${idx}`} className="border-b">
                               <td className="p-2 font-medium">{item.className}</td>
                               <td className="p-2 text-right">{item.count}</td>
                               <td className="p-2 text-right">
@@ -998,7 +1458,7 @@ const PredictionPage = () => {
                   <CardContent>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                       {results.annotatedImages.map((img, idx) => (
-                        <div key={idx} className="space-y-2">
+                        <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
                           <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
                             <img
                               src={img.url}
@@ -1022,6 +1482,35 @@ const PredictionPage = () => {
                   </CardContent>
                 </Card>
               )}
+
+              {/* Start New Inference Button */}
+              <Card>
+                <CardContent className="py-6">
+                  <div className="flex flex-col items-center justify-center space-y-4">
+                    <p className="text-sm text-muted-foreground text-center">
+                      Inference completed successfully. You can start a new inference with the same or different settings.
+                    </p>
+                    <Button
+                      onClick={() => {
+                        setInferenceId(null);
+                        setInferenceStatus("idle");
+                        setInferenceProgress(0);
+                        setProcessedImages(0);
+                        setTotalImages(0);
+                        setResults(null);
+                        clearStorage();
+                        // Scroll to top to show configuration section
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      variant="outline"
+                      className="w-full sm:w-auto"
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      Start New Inference
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             </>
           ) : (
             <Card>
@@ -1035,34 +1524,301 @@ const PredictionPage = () => {
         </>
       )}
 
-      {/* Error State */}
-      {inferenceStatus === "failed" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-destructive">Inference Failed</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              The inference job failed. Please try again or check the logs for more details.
-            </p>
-            <Button
-              onClick={() => {
-                setInferenceId(null);
-                setInferenceStatus("idle");
-                setInferenceProgress(0);
-                setResults(null);
-                clearStorage();
-              }}
-              className="mt-4"
-              variant="outline"
+          {/* Error State */}
+          {inferenceStatus === "failed" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-destructive">Inference Failed</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground">
+                  The inference job failed. Please try again or check the logs for more details.
+                </p>
+                <div className="flex gap-2 mt-4">
+                  <Button
+                    onClick={() => {
+                      setInferenceId(null);
+                      setInferenceStatus("idle");
+                      setInferenceProgress(0);
+                      setResults(null);
+                      clearStorage();
+                    }}
+                    variant="outline"
+                  >
+                    <Play className="mr-2 h-4 w-4" />
+                    Start New Inference
+                  </Button>
+                  <Button
+                    onClick={() => setShowDeleteDialog(true)}
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Cancelled State */}
+          {inferenceStatus === "cancelled" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-muted-foreground">Inference Cancelled</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground">
+                  The inference job has been cancelled. You can start a new inference when ready.
+                </p>
+                <div className="flex gap-2 mt-4">
+                  <Button
+                    onClick={() => {
+                      setInferenceId(null);
+                      setInferenceStatus("idle");
+                      setInferenceProgress(0);
+                      setResults(null);
+                      clearStorage();
+                    }}
+                    variant="outline"
+                  >
+                    <Play className="mr-2 h-4 w-4" />
+                    Start New Inference
+                  </Button>
+                  <Button
+                    onClick={() => setShowDeleteDialog(true)}
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* History Tab */}
+        <TabsContent value="history">
+          {!selectedProjectId ? (
+            <Card>
+              <CardContent className="py-8">
+                <p className="text-center text-muted-foreground">
+                  Please select a project to view inference history.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle>Inference History</CardTitle>
+                    <CardDescription>View past inference jobs and their results</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Label htmlFor="status-filter" className="whitespace-nowrap text-sm">
+                      Filter by Status:
+                    </Label>
+                    <Select value={historyStatusFilter} onValueChange={setHistoryStatusFilter}>
+                      <SelectTrigger id="status-filter" className="w-40 md:w-48 h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="failed">Failed</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                        <SelectItem value="running">Running</SelectItem>
+                        <SelectItem value="queued">Queued</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-4">
+                {loadingPastInferences ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : pastInferences.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-4">
+                    No inference jobs found
+                    {historyStatusFilter !== "all" ? ` with status "${historyStatusFilter}"` : ""}.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {pastInferences.map((job) => (
+                      <Card key={job.inferenceId} className="border-muted">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <CardTitle className="text-sm font-semibold truncate">
+                                Inference: {job.inferenceId}
+                              </CardTitle>
+                              {getStatusBadgeForJob(job.status)}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {(job.status === "completed" ||
+                                job.status === "failed" ||
+                                job.status === "cancelled") && (
+                                <>
+                                  {job.status === "completed" && (
+                                    <Button
+                                      onClick={() => loadPastInferenceResults(job.inferenceId)}
+                                      variant="outline"
+                                      size="sm"
+                                    >
+                                      <Play className="mr-2 h-4 w-4" />
+                                      View Results
+                                    </Button>
+                                  )}
+                                  <Button
+                                    onClick={() => {
+                                      setInferenceId(job.inferenceId);
+                                      setShowDeleteDialog(true);
+                                    }}
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-destructive hover:text-destructive"
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 text-xs md:text-sm">
+                            {job.model && (
+                              <div>
+                                <div className="text-muted-foreground">Model</div>
+                                <div className="font-medium">
+                                  {job.model.modelType} - {job.model.modelVersion || "v1"}
+                                </div>
+                              </div>
+                            )}
+                            {job.dataset && (
+                              <div>
+                                <div className="text-muted-foreground">Dataset</div>
+                                <div className="font-medium">
+                                  {job.dataset.version || "Unversioned"} ({job.dataset.testCount || 0} test images)
+                                </div>
+                              </div>
+                            )}
+                            {job.startedAt && (
+                              <div>
+                                <div className="text-muted-foreground">Started</div>
+                                <div className="font-medium">
+                                  {new Date(job.startedAt).toLocaleString()}
+                                </div>
+                              </div>
+                            )}
+                            {job.completedAt && (
+                              <div>
+                                <div className="text-muted-foreground">Completed</div>
+                                <div className="font-medium">
+                                  {new Date(job.completedAt).toLocaleString()}
+                                </div>
+                              </div>
+                            )}
+                            {job.progress && typeof job.progress === "object" && (
+                              <div>
+                                <div className="text-muted-foreground">Progress</div>
+                                <div className="font-medium">
+                                  {job.progress.processedImages || 0} / {job.progress.totalImages || 0} images
+                                  {job.progress.progressPercent !== undefined && ` (${job.progress.progressPercent}%)`}
+                                </div>
+                              </div>
+                            )}
+                            {job.results && (
+                              <>
+                                <div>
+                                  <div className="text-muted-foreground">Total Detections</div>
+                                  <div className="font-medium">{job.results.totalDetections || 0}</div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground">Avg Confidence</div>
+                                  <div className="font-medium">
+                                    {job.results.averageConfidence
+                                      ? `${(job.results.averageConfidence * 100).toFixed(1)}%`
+                                      : "N/A"}
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          {job.results?.detectionsByClass && job.results.detectionsByClass.length > 0 && (
+                            <div className="mt-3 pt-3 border-t">
+                              <div className="text-xs md:text-sm text-muted-foreground mb-2">Detections by Class</div>
+                              <div className="flex flex-wrap gap-2">
+                                {job.results.detectionsByClass.map((item, idx) => (
+                                  <Badge key={idx} variant="outline">
+                                    {item.className}: {item.count}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Inference Results?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this inference result?
+              <br /><br />
+              This will permanently delete:
+              <ul className="list-disc list-inside mt-2 space-y-1">
+                <li>All annotated images</li>
+                <li>Metadata and results</li>
+                <li>The inference job record</li>
+              </ul>
+              <br />
+              <strong>This action cannot be undone.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingInference}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteInference}
+              disabled={deletingInference}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Start New Inference
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+              {deletingInference ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
 
 export default PredictionPage;
+
