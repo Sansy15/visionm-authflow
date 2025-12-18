@@ -19,6 +19,11 @@
 15. [Deployment](#deployment)
 16. [Testing](#testing)
 17. [Contributing](#contributing)
+18. [Additional Notes](#additional-notes)
+19. [Troubleshooting](#troubleshooting)
+20. [Support & Resources](#support--resources)
+21. [Quick Reference Checklist for New Project Setup](#quick-reference-checklist-for-new-project-setup)
+22. [Additional Resources](#additional-resources)
 
 ---
 
@@ -201,94 +206,286 @@ VisionM helps teams:
 - **Billing** (Placeholder): Billing information page
 - **Usage** (Placeholder): Usage statistics page
 
+### 9. Route Persistence
+
+- **Automatic Route Saving**: Last visited protected route is automatically saved to localStorage
+- **Route Restoration**: On refresh or return, users are automatically redirected to their last visited route
+- **Smart Navigation**: Only restores routes when landing on generic `/dashboard` route
+- **Session-Aware**: Route persistence only works when user is authenticated
+
 ---
 
 ## Project Structure
 
 ```
 visionm-authflow/
-├── public/                 # Static assets
-│   ├── favicon.ico
-│   ├── landing-bg.jpg
-│   └── placeholder.svg
+├── public/                          # Static assets
+│   ├── favicon.ico                  # Site favicon
+│   ├── landing-bg.jpg               # Landing page background image
+│   ├── placeholder.svg             # Placeholder image
+│   └── robots.txt                   # SEO robots file
 │
-├── src/
-│   ├── components/         # React components
-│   │   ├── app-shell/      # Layout components
-│   │   │   ├── AppHeader.tsx
-│   │   │   ├── AppShell.tsx
-│   │   │   ├── AppSidebar.tsx
-│   │   │   ├── Breadcrumbs.tsx
-│   │   │   └── UserMenu.tsx
-│   │   ├── pages/          # Page-specific components
-│   │   │   ├── EmptyState.tsx
-│   │   │   ├── ErrorState.tsx
-│   │   │   ├── LoadingState.tsx
-│   │   │   └── PageHeader.tsx
-│   │   ├── ui/             # shadcn/ui components
-│   │   └── ...             # Feature components
+├── src/                             # Source code
+│   ├── components/                  # React components
+│   │   ├── app-shell/               # Application shell/layout components
+│   │   │   ├── AppHeader.tsx        # Top navigation header
+│   │   │   ├── AppShell.tsx         # Main app shell wrapper
+│   │   │   ├── AppSidebar.tsx       # Side navigation sidebar
+│   │   │   ├── Breadcrumbs.tsx      # Breadcrumb navigation component
+│   │   │   ├── breadcrumb-context.tsx # Breadcrumb context provider
+│   │   │   └── UserMenu.tsx         # User dropdown menu
+│   │   │
+│   │   ├── pages/                   # Page-specific reusable components
+│   │   │   ├── EmptyState.tsx       # Empty state placeholder component
+│   │   │   ├── ErrorState.tsx       # Error state display component
+│   │   │   ├── LoadingState.tsx     # Loading spinner/state component
+│   │   │   └── PageHeader.tsx       # Standardized page header component
+│   │   │
+│   │   ├── ui/                      # shadcn/ui component library
+│   │   │   ├── accordion.tsx        # Accordion component
+│   │   │   ├── alert-dialog.tsx     # Alert dialog component
+│   │   │   ├── alert.tsx            # Alert/notification component
+│   │   │   ├── aspect-ratio.tsx    # Aspect ratio wrapper
+│   │   │   ├── avatar.tsx           # Avatar component
+│   │   │   ├── badge.tsx            # Badge component
+│   │   │   ├── breadcrumb.tsx       # Breadcrumb UI component
+│   │   │   ├── button.tsx           # Button component
+│   │   │   ├── calendar.tsx         # Calendar/date picker component
+│   │   │   ├── card.tsx             # Card container component
+│   │   │   ├── carousel.tsx         # Carousel/slider component
+│   │   │   ├── chart.tsx            # Chart component wrapper
+│   │   │   ├── checkbox.tsx         # Checkbox input component
+│   │   │   ├── collapsible.tsx      # Collapsible section component
+│   │   │   ├── command.tsx          # Command palette component
+│   │   │   ├── context-menu.tsx     # Context menu component
+│   │   │   ├── dialog.tsx           # Modal dialog component
+│   │   │   ├── drawer.tsx           # Drawer/side panel component
+│   │   │   ├── dropdown-menu.tsx    # Dropdown menu component
+│   │   │   ├── form.tsx             # Form wrapper component
+│   │   │   ├── hover-card.tsx       # Hover card component
+│   │   │   ├── input-otp.tsx        # OTP input component
+│   │   │   ├── input.tsx            # Text input component
+│   │   │   ├── label.tsx            # Form label component
+│   │   │   ├── menubar.tsx          # Menu bar component
+│   │   │   ├── navigation-menu.tsx  # Navigation menu component
+│   │   │   ├── pagination.tsx       # Pagination component
+│   │   │   ├── popover.tsx          # Popover component
+│   │   │   ├── progress.tsx         # Progress bar component
+│   │   │   ├── radio-group.tsx      # Radio button group component
+│   │   │   ├── resizable.tsx        # Resizable panel component
+│   │   │   ├── scroll-area.tsx     # Custom scroll area component
+│   │   │   ├── select.tsx           # Select dropdown component
+│   │   │   ├── separator.tsx        # Separator/divider component
+│   │   │   ├── sheet.tsx            # Sheet/side panel component
+│   │   │   ├── sidebar.tsx          # Sidebar component
+│   │   │   ├── skeleton.tsx         # Loading skeleton component
+│   │   │   ├── slider.tsx           # Slider/range input component
+│   │   │   ├── sonner.tsx           # Toast notification component
+│   │   │   ├── switch.tsx           # Toggle switch component
+│   │   │   ├── table.tsx            # Table component
+│   │   │   ├── tabs.tsx             # Tabs component
+│   │   │   ├── textarea.tsx         # Textarea component
+│   │   │   ├── toast.tsx            # Toast component
+│   │   │   ├── toaster.tsx          # Toast container component
+│   │   │   ├── toggle-group.tsx     # Toggle button group component
+│   │   │   ├── toggle.tsx           # Toggle button component
+│   │   │   ├── tooltip.tsx          # Tooltip component
+│   │   │   └── use-toast.ts         # Toast hook
+│   │   │
+│   │   ├── CompanyMembers.tsx       # Company/workspace members list component
+│   │   ├── FormFieldWrapper.tsx     # Reusable form field wrapper
+│   │   ├── InviteUserDialog.tsx     # User invitation dialog
+│   │   ├── JoinCompanyDialog.tsx    # Join workspace dialog
+│   │   ├── JoinRequestsSidePanel.tsx # Join requests management panel
+│   │   ├── NavLink.tsx              # Navigation link component
+│   │   ├── PasswordChecklist.tsx    # Password validation checklist
+│   │   ├── PasswordInput.tsx         # Secure password input component
+│   │   ├── ProfileCompletionDialog.tsx # Profile completion prompt
+│   │   ├── RequestItem.tsx           # Join request item component
+│   │   ├── SimulationView.tsx        # Model training simulation view
+│   │   └── UserProfileDialog.tsx    # User profile edit dialog
 │   │
-│   ├── contexts/           # React contexts
-│   │   ├── ProfileContext.tsx
-│   │   └── profile-context.ts
+│   ├── contexts/                    # React context providers
+│   │   ├── ProfileContext.tsx       # Profile context provider (user/company data)
+│   │   └── profile-context.ts       # Profile context type definitions
 │   │
-│   ├── hooks/              # Custom React hooks
-│   │   ├── useProfile.ts
-│   │   ├── useFormValidation.ts
-│   │   ├── useRoutePersistence.ts
-│   │   └── use-toast.ts
+│   ├── hooks/                       # Custom React hooks
+│   │   ├── use-mobile.tsx           # Mobile device detection hook
+│   │   ├── use-toast.ts             # Toast notification hook
+│   │   ├── useFormValidation.ts     # Form validation hook
+│   │   ├── useProfile.ts            # Profile data access hook
+│   │   └── useRoutePersistence.ts   # Route persistence hook (used in AppShell)
 │   │
-│   ├── integrations/       # Third-party integrations
-│   │   └── supabase/
-│   │       ├── client.ts
-│   │       └── types.ts
+│   ├── integrations/                # Third-party service integrations
+│   │   └── supabase/                 # Supabase integration
+│   │       ├── client.ts             # Supabase client initialization
+│   │       └── types.ts              # Supabase database type definitions
 │   │
-│   ├── layouts/            # Layout components
-│   │   └── MainLayout.tsx
+│   ├── layouts/                     # Layout wrapper components
+│   │   └── MainLayout.tsx           # Main application layout (uses AppShell)
 │   │
-│   ├── lib/                # Utility libraries
-│   │   ├── utils.ts
-│   │   ├── utils/
-│   │   │   └── adminUtils.ts
-│   │   └── validations/
-│   │       └── authSchemas.ts
+│   ├── lib/                         # Utility libraries and helpers
+│   │   ├── utils.ts                 # General utility functions
+│   │   ├── utils/                    # Utility sub-modules
+│   │   │   └── adminUtils.ts        # Admin role checking utilities
+│   │   └── validations/              # Validation schemas
+│   │       └── authSchemas.ts        # Authentication validation schemas (Zod)
 │   │
-│   ├── pages/              # Page components
-│   │   ├── Auth.tsx
-│   │   ├── Dashboard.tsx
-│   │   ├── DatasetManager.tsx
-│   │   ├── PredictionPage.tsx
-│   │   ├── ProjectsPage.tsx
-│   │   └── ...
+│   ├── pages/                       # Page/route components
+│   │   ├── AccountPage.tsx          # Account settings overview page
+│   │   ├── AccountPreferencesPage.tsx # User preferences page
+│   │   ├── AccountProfilePage.tsx   # Profile settings page
+│   │   ├── AccountSecurityPage.tsx  # Security settings page (password change)
+│   │   ├── Auth.tsx                 # Authentication page (login/signup)
+│   │   ├── Dashboard.tsx             # Main dashboard page
+│   │   ├── DatasetManager.tsx       # Dataset management page
+│   │   ├── DatasetPage.tsx          # Dataset detail page
+│   │   ├── Index.tsx                # Index/redirect page
+│   │   ├── Landing.tsx              # Landing/home page
+│   │   ├── NotFound.tsx             # 404 error page
+│   │   ├── PredictionHistoryDetailsPage.tsx # Inference result details page
+│   │   ├── PredictionPage.tsx       # Inference/prediction page
+│   │   ├── ProjectsPage.tsx         # Projects listing page
+│   │   ├── ResetPassword.tsx        # Password reset page
+│   │   ├── SettingsBillingPage.tsx  # Billing settings page (placeholder)
+│   │   ├── SettingsPage.tsx         # Settings overview page
+│   │   ├── SettingsUsagePage.tsx    # Usage statistics page (placeholder)
+│   │   ├── SettingsWorkspacePage.tsx # Workspace settings page
+│   │   ├── SignUpWithInvite.tsx     # Sign up via invitation page
+│   │   ├── TeamInvitationsPage.tsx  # Team invitations management page
+│   │   ├── TeamMembersPage.tsx      # Team members listing page
+│   │   └── VerifyEmail.tsx          # Email verification page
 │   │
-│   ├── utils/              # Utility functions
-│   │   └── trainingPersistence.ts
+│   ├── utils/                       # Utility functions
+│   │   ├── routePersistence.ts      # Route persistence utilities (used in App.tsx)
+│   │   └── trainingPersistence.ts   # Training state persistence utilities
 │   │
-│   ├── App.tsx             # Main app component
-│   ├── main.tsx            # Entry point
-│   └── index.css           # Global styles
+│   ├── App.tsx                      # Main application component (routing)
+│   ├── App.css                      # App-specific styles
+│   ├── index.css                    # Global styles and Tailwind imports
+│   ├── main.tsx                     # Application entry point
+│   └── vite-env.d.ts                # Vite environment type definitions
 │
-├── supabase/
-│   ├── functions/          # Edge Functions
-│   │   ├── accept-invite/
-│   │   ├── approve-workspace-request/
-│   │   ├── create-company/
-│   │   ├── invite-project-user/
-│   │   ├── send-workspace-request/
-│   │   └── ...
+├── supabase/                        # Supabase configuration and functions
+│   ├── .temp/                       # Temporary Supabase CLI files
+│   │   ├── cli-latest               # CLI version info
+│   │   ├── gotrue-version          # GoTrue version
+│   │   ├── pooler-url              # Connection pooler URL
+│   │   ├── postgres-version        # PostgreSQL version
+│   │   ├── project-ref             # Project reference
+│   │   ├── rest-version            # REST API version
+│   │   ├── storage-migration      # Storage migration info
+│   │   └── storage-version        # Storage version
 │   │
-│   ├── migrations/         # Database migrations
-│   │   └── *.sql
+│   ├── functions/                   # Supabase Edge Functions (Deno)
+│   │   ├── accept-invite/           # Accept project invitation
+│   │   │   └── index.ts
+│   │   ├── approve-workspace-request/ # Approve workspace join request
+│   │   │   └── index.ts
+│   │   ├── check-email-exists/      # Check if email exists in system
+│   │   │   └── index.ts
+│   │   ├── create-company/         # Create new workspace/company
+│   │   │   └── index.ts
+│   │   ├── create-invite/          # Create project invitation
+│   │   │   └── index.ts
+│   │   ├── dataset-status/         # Get dataset processing status
+│   │   │   └── index.ts
+│   │   ├── invite-project-user/     # Invite user to project
+│   │   │   └── index.ts
+│   │   ├── reject-workspace-request/ # Reject workspace join request
+│   │   │   └── index.ts
+│   │   ├── send-verification-email/ # Send email verification
+│   │   │   └── index.ts
+│   │   ├── send-workspace-request/  # Send workspace join request
+│   │   │   └── index.ts
+│   │   ├── upload-dataset/         # Initiate dataset upload
+│   │   │   └── index.ts
+│   │   └── validate-invite/        # Validate project invitation token
+│   │       └── index.ts
 │   │
-│   └── config.toml         # Supabase configuration
+│   ├── migrations/                 # Database migration files (SQL)
+│   │   ├── 20251126111624_cd8277f3-67f3-4bc8-86a4-06d7b8541ec9.sql
+│   │   ├── 20251127073139_651fc8ee-6e10-43df-8e37-10fa4d7e5835.sql
+│   │   ├── 20251204131926_add_rls_policies_join_requests.sql
+│   │   ├── 20251205000000_allow_company_members_to_edit_projects.sql
+│   │   ├── 20251205000001_prevent_admin_email_update.sql
+│   │   ├── 20251205000002_ensure_created_by_column.sql
+│   │   ├── 20251205000003_fix_companies_rls.sql
+│   │   ├── 20251206000000_fix_profile_phone_null.sql
+│   │   ├── 20251206000001_fix_companies_rls_insert.sql
+│   │   ├── 20251206000002_simplify_companies_rls.sql
+│   │   ├── 20251207000000_fix_companies_select_policy.sql
+│   │   ├── 20251208000000_allow_company_existence_check.sql
+│   │   ├── 20251208000001_fix_join_requests_rls.sql
+│   │   ├── 20251209000000_add_role_to_profiles.sql
+│   │   ├── 20251209000001_get_join_request_user_info.sql
+│   │   ├── 20251209000002_fix_profiles_rls_admin_view_members.sql
+│   │   ├── 20251209133418_add_ignored_status_to_join_requests.sql
+│   │   └── APPLY_MIGRATIONS.sql    # Migration application script
+│   │
+│   └── config.toml                 # Supabase project configuration
 │
-├── .env                    # Environment variables
-├── package.json            # Dependencies
-├── tsconfig.json           # TypeScript config
-├── vite.config.ts          # Vite configuration
-├── tailwind.config.ts      # Tailwind CSS config
-└── README.md               # Quick start guide
+├── scripts/                         # Build and utility scripts
+│   ├── README.md                    # Scripts documentation
+│   ├── setup-git-hooks.js           # Git hooks setup script
+│   └── update-docs.js               # Documentation auto-update script
+│
+├── .env                             # Environment variables (not in git)
+├── .gitignore                       # Git ignore rules
+├── additional_api_endpoints.csv     # Additional API endpoints reference
+├── bun.lockb                        # Bun lock file (if using Bun)
+├── components.json                  # shadcn/ui components configuration
+├── eslint.config.js                 # ESLint configuration
+├── index.html                       # HTML entry point
+├── package-lock.json                # npm lock file
+├── package.json                     # Project dependencies and scripts
+├── postcss.config.js                # PostCSS configuration
+├── PROJECT_DOCUMENTATION.md         # This documentation file
+├── README.md                        # Quick start guide
+├── tailwind.config.ts               # Tailwind CSS configuration
+├── tsconfig.app.json                # TypeScript config for app
+├── tsconfig.json                    # TypeScript root configuration
+├── tsconfig.node.json               # TypeScript config for Node.js
+└── vite.config.ts                   # Vite build tool configuration
 ```
+
+### Directory Descriptions
+
+#### `/public`
+Static assets served directly by the web server. Files here are copied to the build output as-is.
+
+#### `/src/components`
+- **`app-shell/`**: Core layout components that wrap the entire application
+- **`pages/`**: Reusable components used across multiple pages
+- **`ui/`**: shadcn/ui component library (50+ components)
+- **Root components**: Feature-specific components for dialogs, forms, and business logic
+
+#### `/src/contexts`
+React Context providers for global state management (profile, user data).
+
+#### `/src/hooks`
+Custom React hooks for reusable logic (profile access, form validation, route persistence).
+
+#### `/src/integrations`
+Third-party service integrations (currently Supabase for auth and database).
+
+#### `/src/layouts`
+Layout wrapper components that define page structure.
+
+#### `/src/lib`
+Utility libraries, helper functions, and validation schemas.
+
+#### `/src/pages`
+Route components - one file per route/page in the application.
+
+#### `/src/utils`
+Utility functions for specific features (route persistence, training state).
+
+#### `/supabase/functions`
+Supabase Edge Functions (serverless functions running on Deno runtime).
+
+#### `/supabase/migrations`
+Database migration files applied in chronological order to set up the database schema.
 
 ---
 
@@ -641,6 +838,75 @@ Public routes:
 - **npm** or **bun** package manager
 - **Supabase Account** and project
 - **Backend API** running (separate service)
+- **Git** (for cloning repository)
+- **Code Editor** (VS Code recommended)
+
+### Creating a New Project from Scratch
+
+If you want to create a completely new project based on this documentation:
+
+1. **Initialize New Project**
+   ```bash
+   npm create vite@latest visionm-authflow -- --template react-ts
+   cd visionm-authflow
+   npm install
+   ```
+
+2. **Install All Dependencies**
+   ```bash
+   npm install @hookform/resolvers @radix-ui/react-accordion @radix-ui/react-alert-dialog @radix-ui/react-aspect-ratio @radix-ui/react-avatar @radix-ui/react-checkbox @radix-ui/react-collapsible @radix-ui/react-context-menu @radix-ui/react-dialog @radix-ui/react-dropdown-menu @radix-ui/react-hover-card @radix-ui/react-label @radix-ui/react-menubar @radix-ui/react-navigation-menu @radix-ui/react-popover @radix-ui/react-progress @radix-ui/react-radio-group @radix-ui/react-scroll-area @radix-ui/react-select @radix-ui/react-separator @radix-ui/react-slider @radix-ui/react-slot @radix-ui/react-switch @radix-ui/react-tabs @radix-ui/react-toast @radix-ui/react-toggle @radix-ui/react-toggle-group @radix-ui/react-tooltip @supabase/supabase-js @tanstack/react-query class-variance-authority clsx cmdk date-fns embla-carousel-react input-otp lucide-react next-themes react react-day-picker react-dom react-hook-form react-resizable-panels react-router-dom recharts sonner tailwind-merge tailwindcss-animate vaul zod
+   
+   npm install -D @eslint/js @tailwindcss/typography @types/node @types/react @types/react-dom @vitejs/plugin-react-swc autoprefixer eslint eslint-plugin-react-hooks eslint-plugin-react-refresh globals lovable-tagger postcss tailwindcss typescript typescript-eslint
+   ```
+
+3. **Set Up Project Structure**
+   - Create all folders as documented in "Project Structure" section
+   - Copy configuration files: `vite.config.ts`, `tailwind.config.ts`, `tsconfig.json`, `postcss.config.js`
+   - Set up path aliases in `tsconfig.json`: `"@/*": ["./src/*"]`
+
+4. **Configure Tailwind CSS and shadcn/ui**
+   - Install Tailwind CSS: `npm install -D tailwindcss postcss autoprefixer`
+   - Initialize Tailwind: `npx tailwindcss init -p`
+   - Configure `tailwind.config.ts` with content paths: `["./index.html", "./src/**/*.{js,ts,jsx,tsx}"]`
+   - Set up `components.json` for shadcn/ui:
+     ```json
+     {
+       "style": "default",
+       "rsc": false,
+       "tsx": true,
+       "tailwind": {
+         "config": "tailwind.config.ts",
+         "css": "src/index.css",
+         "baseColor": "slate",
+         "cssVariables": true
+       },
+       "aliases": {
+         "components": "@/components",
+         "utils": "@/lib/utils",
+         "ui": "@/components/ui"
+       }
+     }
+     ```
+   - Install shadcn/ui components as needed: `npx shadcn-ui@latest add [component-name]`
+
+5. **Set Up Supabase**
+   - Follow "Supabase Setup" section below
+   - Initialize Supabase in project: `supabase init`
+   - Create all migrations
+   - Deploy all Edge Functions
+   - **Configure Email Service**:
+     - Option A: Get Resend API key (recommended for full functionality)
+     - Option B: Configure Supabase SMTP/email templates
+     - Option C: Modify functions to use only Supabase email (requires code changes)
+
+6. **Create All Components and Pages**
+   - Follow the structure in "Project Structure" section
+   - Implement all components as documented in "Key Components"
+   - Create all pages as documented in "Pages & Routes"
+
+7. **Configure Environment Variables**
+   - Create `.env` file with all required variables
+   - See "Configuration" section for details
 
 ### Installation Steps
 
@@ -661,16 +927,95 @@ Public routes:
    Create `.env` file in root directory:
    ```env
    VITE_SUPABASE_URL=your_supabase_url
-   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
    VITE_API_BASE_URL=http://localhost:3000/api
    ```
+   
+   **Note**: The environment variable is `VITE_SUPABASE_PUBLISHABLE_KEY` (not `VITE_SUPABASE_ANON_KEY`). This is the Supabase anonymous/public key from your Supabase project settings.
 
 4. **Supabase Setup**
-   - Create Supabase project
-   - Run migrations from `supabase/migrations/`
-   - Configure storage bucket: `datasets`
-   - Set up Edge Functions
-   - Configure email templates
+   
+   **a. Create Supabase Project**
+   - Go to [supabase.com](https://supabase.com) and create a new project
+   - Note your project URL and API keys from Settings → API
+   
+   **b. Database Setup**
+   - Run all migrations in order from `supabase/migrations/` directory:
+     ```bash
+     # Using Supabase CLI (recommended)
+     supabase db push
+     
+     # Or manually apply each migration file in Supabase SQL Editor
+     ```
+   - Verify all tables are created: `profiles`, `companies`, `projects`, `datasets`, `workspace_join_requests`, `project_users`, `dataset_files`, `email_verification_tokens`
+   
+   **c. Storage Bucket Configuration**
+   - Go to Storage in Supabase dashboard
+   - Create a new bucket named `datasets`
+   - Set bucket to **Private**
+   - Enable RLS (Row Level Security)
+   - Configure policies to allow users to upload/view files in their company's datasets
+   
+   **d. Edge Functions Setup**
+   - Deploy all Edge Functions from `supabase/functions/`:
+     ```bash
+     supabase functions deploy accept-invite
+     supabase functions deploy approve-workspace-request
+     supabase functions deploy check-email-exists
+     supabase functions deploy create-company
+     supabase functions deploy create-invite
+     supabase functions deploy dataset-status
+     supabase functions deploy invite-project-user
+     supabase functions deploy reject-workspace-request
+     supabase functions deploy send-verification-email
+     supabase functions deploy send-workspace-request
+     supabase functions deploy upload-dataset
+     supabase functions deploy validate-invite
+     ```
+   
+   **e. Edge Function Environment Variables**
+   - For each Edge Function, set these environment variables in Supabase dashboard:
+     - `SUPABASE_URL`: Your Supabase project URL (required for all functions)
+     - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key (required for all functions, from Settings → API)
+     - `APP_URL` or `FRONTEND_URL`: Your application URL (required for functions that send emails, e.g., `http://localhost:8080` for dev)
+     - `RESEND_API_KEY`: Your Resend API key (required for some email functions, see Email Configuration below)
+   
+   **f. Email Configuration**
+   
+   **Email Service Overview:**
+   - This project uses a **mixed email approach**:
+     - **Supabase Built-in Email**: Used by `create-invite` function (via `signInWithOtp`)
+     - **Resend API**: Used by other email functions for custom email templates
+   
+   **Functions Using Supabase Email (No Resend Required):**
+   - `create-invite`: Uses Supabase's `signInWithOtp()` to send magic link emails
+   
+   **Functions Requiring Resend API Key:**
+   - `send-verification-email`: Requires `RESEND_API_KEY` (will fail without it)
+   - `invite-project-user`: Requires `RESEND_API_KEY` (will fail without it)
+   - `reject-workspace-request`: Requires `RESEND_API_KEY` (will fail without it)
+   
+   **Functions with Optional Resend (Work Without It):**
+   - `approve-workspace-request`: Works without Resend, skips email if not configured
+   - `send-workspace-request`: Works without Resend, skips email if not configured
+   
+   **Setup Options:**
+   
+   **Option 1: Use Resend (Recommended for Full Functionality)**
+   - Sign up at [resend.com](https://resend.com) and get API key
+   - Set `RESEND_API_KEY` for functions that require it
+   - All email functionality will work
+   
+   **Option 2: Use Only Supabase Email**
+   - Configure Supabase email in Dashboard → Settings → Auth → Email Templates
+   - Set up SMTP in Dashboard → Settings → Auth → SMTP Settings (if needed)
+   - Modify functions that require Resend to use Supabase email instead
+   - Note: Some functions will not send emails without Resend or modification
+   
+   **Option 3: Hybrid Approach**
+   - Use Supabase email for `create-invite` (already configured)
+   - Use Resend for other functions that require it
+   - Leave optional functions without Resend (they'll work but won't send emails)
 
 5. **Start Development Server**
    ```bash
@@ -697,15 +1042,37 @@ supabase db push
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `VITE_SUPABASE_URL` | Supabase project URL | Yes |
-| `VITE_SUPABASE_ANON_KEY` | Supabase anonymous key | Yes |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable/anonymous key | Yes |
 | `VITE_API_BASE_URL` | Backend API base URL | Yes |
 
 ### Vite Configuration
 
 - **Port**: 8080 (configurable in `vite.config.ts`)
 - **Host**: `::` (all interfaces)
-- **HMR**: Enabled with overlay disabled
-- **Path Alias**: `@` → `./src`
+- **HMR**: Enabled with overlay disabled (prevents refresh issues)
+- **Path Alias**: `@` → `./src` (configured in `vite.config.ts` and `tsconfig.json`)
+- **Plugins**: React SWC plugin for fast refresh, component tagger in development mode
+
+### shadcn/ui Configuration
+
+The `components.json` file configures shadcn/ui:
+- **Style**: Default (slate base color)
+- **TypeScript**: Enabled
+- **CSS Variables**: Enabled for theming
+- **Aliases**: Components use `@/components`, utils use `@/lib/utils`
+
+### Scripts
+
+The `scripts/` directory contains utility scripts:
+- **`update-docs.js`**: Automatically updates PROJECT_DOCUMENTATION.md by extracting:
+  - Routes from `src/App.tsx`
+  - Pages from `src/pages/`
+  - Components from `src/components/`
+  - Edge Functions from `supabase/functions/`
+  - Migrations from `supabase/migrations/`
+- **`setup-git-hooks.js`**: Sets up git hooks to auto-update documentation on commit
+- Run manually: `npm run docs:update`
+- Setup git hooks: `npm run docs:setup-hooks`
 
 ### Supabase Configuration
 
@@ -723,11 +1090,36 @@ All functions in `supabase/functions/` need to be deployed:
 supabase functions deploy <function-name>
 ```
 
-Required environment variables for functions:
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `RESEND_API_KEY` (for email functions)
-- `APP_URL` (application URL for email links)
+**Complete list of Edge Functions:**
+- `accept-invite` - Handles project invitation acceptance
+- `approve-workspace-request` - Approves workspace join requests (email optional)
+- `check-email-exists` - Checks if email exists in system
+- `create-company` - Creates new workspace/company
+- `create-invite` - Creates project invitations (uses Supabase email)
+- `dataset-status` - Provides dataset processing status
+- `invite-project-user` - Invites user to project (requires Resend)
+- `reject-workspace-request` - Rejects workspace join requests (requires Resend)
+- `send-verification-email` - Sends email verification (requires Resend)
+- `send-workspace-request` - Sends join request to workspace admin (email optional)
+- `upload-dataset` - Handles dataset upload initiation
+- `validate-invite` - Validates project invitation token
+
+**Required environment variables:**
+
+**For ALL functions:**
+- `SUPABASE_URL` - Your Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` - Your Supabase service role key (from Settings → API)
+
+**For functions that send emails:**
+- `APP_URL` or `FRONTEND_URL` - Application URL for email links (e.g., `http://localhost:8080` for dev)
+
+**For functions that require Resend (see Email Configuration section):**
+- `RESEND_API_KEY` - Your Resend API key
+  - **Required for**: `send-verification-email`, `invite-project-user`, `reject-workspace-request`
+  - **Optional for**: `approve-workspace-request`, `send-workspace-request` (functions work without it, but won't send emails)
+  - **Not needed for**: `create-invite` (uses Supabase email)
+
+**Note**: Set these in Supabase Dashboard → Edge Functions → Settings → Secrets for each function.
 
 ---
 
@@ -894,7 +1286,7 @@ Join request management panel for admins.
 | `/auth` | `Auth.tsx` | Authentication (sign in/sign up) |
 | `/reset-password` | `ResetPassword.tsx` | Password reset flow |
 | `/verify-email` | `VerifyEmail.tsx` | Email verification |
-| `/signup-invite/:token` | `SignUpWithInvite.tsx` | Sign up via invitation |
+| `/signup-invite/:token` | `SignUpWithInvite.tsx` | Sign up via invitation (component exists but route not currently implemented in App.tsx) |
 
 ### Protected Routes (require authentication)
 
@@ -955,26 +1347,51 @@ Checks if email exists in system.
 
 #### `create-company`
 Creates new workspace/company.
+- **Email Service**: None (no emails sent)
+- **Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 
 #### `send-workspace-request`
 Sends join request to workspace admin.
+- **Email Service**: Resend (optional - function works without it, but won't send email)
+- **Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `APP_URL`, `RESEND_API_KEY` (optional)
+- **Functionality**: Creates join request and sends email to admin if Resend is configured
 
 #### `approve-workspace-request`
 Approves workspace join request.
+- **Email Service**: Resend (optional - function works without it, but won't send email)
+- **Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `FRONTEND_URL`, `RESEND_API_KEY` (optional)
+- **Functionality**: Approves request, adds user to company, sends approval email if Resend is configured
 
 #### `reject-workspace-request`
 Rejects workspace join request.
+- **Email Service**: Requires Resend API key
+- **Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`
+- **Functionality**: Rejects request and sends rejection email via Resend
 
 ### Project Management
 
 #### `invite-project-user`
 Invites user to project with access control.
+- **Email Service**: Requires Resend API key
+- **Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `APP_URL`, `RESEND_API_KEY`
+- **Functionality**: Creates project invite and sends invitation email via Resend
+
+#### `create-invite`
+Creates company/workspace invitations.
+- **Email Service**: Uses Supabase built-in email (via `signInWithOtp`)
+- **Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `APP_URL`
+- **Functionality**: Creates invite and sends magic link email via Supabase Auth (no Resend needed)
+- **Note**: This is the only function that uses Supabase's native email service
 
 #### `accept-invite`
 Handles project invitation acceptance.
+- **Email Service**: None (no emails sent)
+- **Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 
 #### `validate-invite`
 Validates project invitation token.
+- **Email Service**: None (no emails sent)
+- **Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 
 ### Dataset Management
 
@@ -1003,7 +1420,7 @@ Provides dataset processing status.
 
 3. **Environment Variables**
    - Set `VITE_SUPABASE_URL` to production URL
-   - Set `VITE_SUPABASE_ANON_KEY` to production key
+   - Set `VITE_SUPABASE_PUBLISHABLE_KEY` to production publishable key
    - Set `VITE_API_BASE_URL` to production API URL
 
 ### Build Process
@@ -1021,6 +1438,20 @@ Builds optimized production bundle in `dist/` directory.
 - Click "Share → Publish" in Lovable dashboard
 - Automatically deploys and provides URL
 
+#### Azure Static Web Apps (Recommended)
+- **Best for**: React/Vite static applications
+- **Setup**:
+  1. Create Azure Static Web App resource in Azure Portal
+  2. Connect GitHub repository
+  3. Configure build settings:
+     - App location: `/`
+     - Output location: `dist`
+     - Build command: `npm run build`
+  4. Set environment variables in Azure Portal → Configuration
+  5. Deploy automatically on push to main branch
+- **Benefits**: Free tier available, global CDN, automatic HTTPS, custom domains
+- **Note**: For SPA routing, ensure `routes.json` in `public/` redirects all routes to `index.html`
+
 #### Vercel/Netlify
 - Connect GitHub repository
 - Set environment variables
@@ -1031,6 +1462,7 @@ Builds optimized production bundle in `dist/` directory.
 - Serve `dist/` directory with web server (nginx, Apache)
 - Configure reverse proxy if needed
 - Set up SSL certificates
+- **SPA Routing**: Configure URL rewrite rules to serve `index.html` for all routes
 
 ### Post-Deployment
 
@@ -1185,6 +1617,19 @@ refactor: Simplify authentication flow
 - **Problem**: RLS policy errors
 - **Solution**: Verify user has correct company_id, check RLS policies
 
+#### Email Issues
+- **Problem**: Email functions failing with "Missing RESEND_API_KEY"
+- **Solution**: 
+  - For `send-verification-email`, `invite-project-user`, `reject-workspace-request`: Set `RESEND_API_KEY` environment variable
+  - For `approve-workspace-request`, `send-workspace-request`: Resend is optional - functions work without it but won't send emails
+  - For `create-invite`: Uses Supabase email - ensure Supabase email is configured in Dashboard → Settings → Auth
+- **Problem**: Emails not being sent
+- **Solution**: 
+  - Check Resend API key is valid and has verified domain
+  - Verify `APP_URL` or `FRONTEND_URL` is set correctly
+  - Check Supabase email configuration if using `create-invite`
+  - Review Edge Function logs in Supabase Dashboard
+
 ---
 
 ## Support & Resources
@@ -1199,6 +1644,88 @@ refactor: Simplify authentication flow
 - [Supabase Documentation](https://supabase.com/docs)
 - [Tailwind CSS Documentation](https://tailwindcss.com/docs)
 - [shadcn/ui Documentation](https://ui.shadcn.com)
+
+---
+
+---
+
+## Quick Reference Checklist for New Project Setup
+
+### Initial Setup
+- [ ] Install Node.js 18+
+- [ ] Clone or initialize project
+- [ ] Install all dependencies from `package.json`
+- [ ] Create `.env` file with required variables
+- [ ] Configure `vite.config.ts` (port 8080, path aliases)
+- [ ] Set up Tailwind CSS and shadcn/ui
+- [ ] Configure TypeScript paths (`@/*` → `./src/*`)
+
+### Supabase Setup
+- [ ] Create Supabase project
+- [ ] Apply all database migrations in order
+- [ ] Create `datasets` storage bucket (private, RLS enabled)
+- [ ] Deploy all 12 Edge Functions
+- [ ] Set environment variables for each Edge Function:
+  - [ ] `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for all functions
+  - [ ] `APP_URL` or `FRONTEND_URL` for email functions
+  - [ ] `RESEND_API_KEY` for functions that require it (optional for some)
+- [ ] Configure email service:
+  - [ ] Option A: Get Resend API key and set for required functions
+  - [ ] Option B: Configure Supabase SMTP/email templates
+  - [ ] Option C: Modify functions to use only Supabase email
+
+### Backend API Setup
+- [ ] Ensure backend API is running
+- [ ] Verify `VITE_API_BASE_URL` points to correct endpoint
+- [ ] Test API connectivity
+- [ ] Configure CORS for frontend domain
+
+### Development
+- [ ] Run `npm run dev` (should start on port 8080)
+- [ ] Verify all routes work
+- [ ] Test authentication flow
+- [ ] Test file uploads
+- [ ] Verify email functionality
+
+### Production Deployment
+- [ ] Build production bundle: `npm run build`
+- [ ] Set production environment variables
+- [ ] Deploy frontend (Vercel/Netlify/Azure Static Web Apps)
+- [ ] Deploy backend API
+- [ ] Update Supabase Edge Function `APP_URL` to production URL
+- [ ] Test all features in production
+
+---
+
+---
+
+## Additional Resources
+
+### Configuration Files Reference
+
+- **`components.json`**: shadcn/ui configuration (component paths, aliases, styling)
+- **`vite.config.ts`**: Vite build configuration (port, plugins, path aliases)
+- **`tailwind.config.ts`**: Tailwind CSS configuration (theme, content paths)
+- **`tsconfig.json`**: TypeScript root configuration
+- **`tsconfig.app.json`**: TypeScript configuration for application code
+- **`tsconfig.node.json`**: TypeScript configuration for Node.js scripts
+- **`postcss.config.js`**: PostCSS configuration (Tailwind, Autoprefixer)
+- **`eslint.config.js`**: ESLint linting rules
+- **`index.html`**: HTML entry point for the application
+
+### Important Notes
+
+1. **Environment Variables**: Always use `VITE_SUPABASE_PUBLISHABLE_KEY` (not `VITE_SUPABASE_ANON_KEY`)
+2. **Route Persistence**: Implemented via `routePersistence.ts` (utils) and `useRoutePersistence.ts` (hook)
+3. **Profile Loading**: Timeout errors are soft-handled to preserve user experience
+4. **SPA Routing**: For production deployment, ensure all routes redirect to `index.html` for client-side routing
+5. **Database Migrations**: Must be applied in chronological order (by filename timestamp)
+6. **Email Configuration**: 
+   - **Mixed Email Approach**: Project uses both Supabase email (`create-invite`) and Resend API (other functions)
+   - **Resend Required**: `send-verification-email`, `invite-project-user`, `reject-workspace-request` require `RESEND_API_KEY`
+   - **Resend Optional**: `approve-workspace-request`, `send-workspace-request` work without Resend but won't send emails
+   - **Supabase Email**: `create-invite` uses Supabase's built-in email service (no Resend needed)
+   - **Alternative**: To use only Supabase email, modify the 3 functions that require Resend to use Supabase email instead
 
 ---
 
