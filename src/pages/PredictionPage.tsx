@@ -157,6 +157,7 @@ interface InferenceJob {
 }
 
 const STORAGE_PREFIX = "prediction_";
+type InferenceMode = "dataset" | "custom";
 
 const PredictionPage = () => {
   const { profile, company, sessionReady } = useProfile();
@@ -193,6 +194,9 @@ const PredictionPage = () => {
   const [loadingPastInferences, setLoadingPastInferences] = useState(false);
   const [selectedPastInferenceId, setSelectedPastInferenceId] = useState<string | null>(null);
   const [historyStatusFilter, setHistoryStatusFilter] = useState<string>("all");
+
+  // Inference mode: dataset-based vs custom upload
+  const [inferenceMode, setInferenceMode] = useState<InferenceMode>("dataset");
 
   // Local UI state for test inputs (drag-and-drop, select image/video)
   const [testFiles, setTestFiles] = useState<File[]>([]);
@@ -251,6 +255,13 @@ const PredictionPage = () => {
       // ignore
     }
   };
+
+  // Restore inference mode on mount
+  useEffect(() => {
+    const savedMode = loadFromStorage<InferenceMode>("inferenceMode", "dataset");
+    setInferenceMode(savedMode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load projects when company_id is available
   useEffect(() => {
@@ -471,6 +482,12 @@ const PredictionPage = () => {
   const handleDatasetSelect = (datasetId: string) => {
     setSelectedDatasetId(datasetId);
     saveToStorage("datasetId", datasetId);
+  };
+
+  // Handle inference mode change
+  const handleInferenceModeChange = (mode: InferenceMode) => {
+    setInferenceMode(mode);
+    saveToStorage("inferenceMode", mode);
   };
 
   // Handle test file additions (UI only – no API changes)
@@ -877,31 +894,76 @@ const PredictionPage = () => {
 
   // Start inference
   const handleStartInference = async () => {
-    if (!selectedDatasetId || !selectedModelId) {
+    // Model is always required
+    if (!selectedModelId) {
       toast({
-        title: "Selection required",
-        description: "Please select both a dataset and a model.",
+        title: "Model required",
+        description: "Please select a model before starting inference.",
         variant: "destructive",
       });
       return;
+    }
+
+    if (inferenceMode === "dataset") {
+      if (!selectedDatasetId) {
+        toast({
+          title: "Dataset required",
+          description: "Please select a dataset when using dataset mode.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } else {
+      // Custom images mode
+      if (testFiles.length === 0) {
+        toast({
+          title: "Test images required",
+          description: "Add at least one image or video when using custom upload mode.",
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     setStartingInference(true);
     try {
       const headers = await getAuthHeaders();
       const url = apiUrl("/inference/start");
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          modelId: selectedModelId,
-          datasetId: selectedDatasetId,
-          confidenceThreshold: confidenceThreshold,
-        }),
-      });
+
+      let res: Response;
+
+      if (inferenceMode === "dataset") {
+        // Existing JSON-based dataset inference
+        res = await fetch(url, {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            modelId: selectedModelId,
+            datasetId: selectedDatasetId,
+            confidenceThreshold: confidenceThreshold,
+          }),
+        });
+      } else {
+        // New custom upload inference using multipart/form-data
+        const formData = new FormData();
+        formData.append("modelId", selectedModelId);
+        formData.append("confidenceThreshold", confidenceThreshold.toString());
+        testFiles.forEach((file) => {
+          formData.append("images", file);
+        });
+
+        res = await fetch(url, {
+          method: "POST",
+          headers: {
+            ...headers,
+            // Do not set Content-Type here; the browser will set it with the correct boundary
+          },
+          body: formData,
+        });
+      }
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => "");
@@ -1111,6 +1173,38 @@ const PredictionPage = () => {
 
         {/* New Inference Tab */}
         <TabsContent value="new" className="space-y-6">
+          {/* Inference mode toggle */}
+          {inferenceStatus === "idle" && selectedProjectId && (
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium">Inference mode</h3>
+                <p className="text-xs text-muted-foreground">
+                  Choose whether to use a dataset&apos;s test folder or upload custom images.
+                </p>
+              </div>
+              <div className="inline-flex rounded-md border bg-muted/50 p-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={inferenceMode === "dataset" ? "default" : "ghost"}
+                  className="rounded-sm"
+                  onClick={() => handleInferenceModeChange("dataset")}
+                >
+                  Use dataset
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={inferenceMode === "custom" ? "default" : "ghost"}
+                  className="rounded-sm"
+                  onClick={() => handleInferenceModeChange("custom")}
+                >
+                  Upload custom images
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Configuration Section */}
           {inferenceStatus === "idle" && selectedProjectId && (
         <div className="grid gap-6 md:grid-cols-2">
@@ -1360,11 +1454,17 @@ const PredictionPage = () => {
               </div>
             </div>
 
-            <Button
-              onClick={handleStartInference}
-              disabled={!selectedProjectId || !selectedDatasetId || !selectedModelId || startingInference}
-              className="w-full"
-            >
+            {(() => {
+              const canStart =
+                inferenceMode === "dataset"
+                  ? !!selectedProjectId && !!selectedDatasetId && !!selectedModelId
+                  : !!selectedProjectId && !!selectedModelId && testFiles.length > 0;
+              return (
+                <Button
+                  onClick={handleStartInference}
+                  disabled={!canStart || startingInference}
+                  className="w-full"
+                >
               {startingInference ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1376,7 +1476,9 @@ const PredictionPage = () => {
                   Start Prediction
                 </>
               )}
-            </Button>
+                </Button>
+              );
+            })()}
           </CardContent>
         </Card>
       )}
