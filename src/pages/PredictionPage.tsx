@@ -493,10 +493,31 @@ const PredictionPage = () => {
   // Handle test file additions (UI only – no API changes)
   const handleAddTestFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
+
+    const allowedExtensions = ["jpg", "jpeg", "png"];
+    const incoming = Array.from(files);
+
+    const validFiles = incoming.filter((file) => {
+      const ext = file.name.toLowerCase().split(".").pop() || "";
+      return allowedExtensions.includes(ext);
+    });
+
+    if (validFiles.length !== incoming.length) {
+      toast({
+        title: "Some files were ignored",
+        description: "Only JPG, JPEG, and PNG image files are supported for custom upload.",
+        variant: "destructive",
+      });
+    }
+
+    if (validFiles.length === 0) {
+      return;
+    }
+
     setTestFiles((prev) => {
       const existingNames = new Set(prev.map((f) => f.name));
       const next: File[] = [...prev];
-      Array.from(files).forEach((file) => {
+      validFiles.forEach((file) => {
         // Avoid duplicate file entries by name
         if (!existingNames.has(file.name)) {
           next.push(file);
@@ -1207,216 +1228,254 @@ const PredictionPage = () => {
 
           {/* Configuration Section */}
           {inferenceStatus === "idle" && selectedProjectId && (
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Test Inputs (replaces Dataset Selection visually, keeps logic unchanged) */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Test Inputs</CardTitle>
-              <CardDescription>Add test images, videos, or use your camera for inference</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Drag & Drop Area */}
-              <div
-                className={cn(
-                  "border-2 border-dashed rounded-lg px-4 py-8 flex flex-col items-center justify-center text-center transition-colors cursor-pointer",
-                  isDragging ? "border-primary bg-primary/5" : "border-muted-foreground/30 bg-muted/20 hover:bg-muted/30"
-                )}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setIsDragging(true);
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault();
-                  setIsDragging(false);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setIsDragging(false);
-                  handleAddTestFiles(e.dataTransfer.files);
-                }}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    const input = document.getElementById("prediction-test-files-input");
-                    if (input) {
-                      (input as HTMLInputElement).click();
-                    }
-                  }
-                }}
-              >
-                <BrainCircuit className="h-8 w-8 text-primary mb-3" />
-                <p className="text-sm font-medium">
-                  Drag &amp; drop test images or videos here
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Supported formats: common image (PNG, JPG) and video (MP4, MOV) files
-                </p>
-              </div>
-
-              {/* Hidden file inputs for Select image / Select video */}
-              <input
-                id="prediction-test-files-input"
-                type="file"
-                accept="image/*,video/*"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  handleAddTestFiles(e.target.files);
-                  // Do not clear the value so the same file can be re-selected if needed
-                }}
-              />
-              <input
-                id="prediction-test-image-input"
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  handleAddTestFiles(e.target.files);
-                  // Do not clear the value so the same file can be re-selected if needed
-                }}
-              />
-              <input
-                id="prediction-test-video-input"
-                type="file"
-                accept="video/*"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  handleAddTestFiles(e.target.files);
-                  // Do not clear the value so the same file can be re-selected if needed
-                }}
-              />
-
-              {/* Action buttons */}
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex items-center gap-2"
-                  onClick={() => {
-                    const input = document.getElementById("prediction-test-image-input");
-                    if (input) {
-                      (input as HTMLInputElement).click();
-                    }
-                  }}
-                >
-                  <ImageIcon className="h-4 w-4" />
-                  Select image
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex items-center gap-2"
-                  onClick={() => {
-                    const input = document.getElementById("prediction-test-video-input");
-                    if (input) {
-                      (input as HTMLInputElement).click();
-                    }
-                  }}
-                >
-                  <Video className="h-4 w-4" />
-                  Select video
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex items-center gap-2"
-                  // UI only: placeholder for future live camera support
-                  onClick={() => {
-                    toast({
-                      title: "Live camera",
-                      description: "Live camera input will be supported in a future update.",
-                    });
-                  }}
-                >
-                  <Camera className="h-4 w-4" />
-                  Live camera
-                </Button>
-              </div>
-
-              {/* Selected files summary (UI only) */}
-              {testFiles.length > 0 && (
-                <div className="mt-2 rounded-md bg-muted/40 border border-dashed border-muted-foreground/30 px-3 py-2 text-xs">
-                  <div className="font-medium mb-1">
-                    {testFiles.length} file{testFiles.length !== 1 ? "s" : ""} selected
-                  </div>
-                  <div className="space-y-0.5 max-h-20 overflow-auto">
-                    {testFiles.slice(0, 3).map((file) => (
-                      <div key={file.name} className="truncate text-muted-foreground">
-                        {file.name}
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Left: dataset selector in dataset mode, custom upload in custom mode */}
+              {inferenceMode === "dataset" ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Select Dataset</CardTitle>
+                    <CardDescription>Choose a dataset with test images for inference</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {loadingDatasets ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                       </div>
-                    ))}
-                    {testFiles.length > 3 && (
-                      <div className="text-muted-foreground">
-                        + {testFiles.length - 3} more
+                    ) : datasets.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No ready datasets available for this project. Datasets must have test images.
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-60 overflow-auto">
+                        {datasets.map((dataset, idx) => {
+                          const datasetId = dataset.datasetId || dataset._id || dataset.id || "";
+                          const isSelected = datasetId === selectedDatasetId;
+                          const datasetKey = datasetId || `dataset-${idx}`;
+                          return (
+                            <button
+                              key={datasetKey}
+                              onClick={() => handleDatasetSelect(datasetId)}
+                              className={cn(
+                                "w-full text-left p-3 rounded-md border transition-colors",
+                                isSelected
+                                  ? "border-primary bg-primary/5"
+                                  : "border-border hover:bg-muted"
+                              )}
+                            >
+                              <div className="font-medium">{dataset.version || "Unversioned"}</div>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                Test: {dataset.testCount || 0} • Total: {dataset.totalImages || 0}
+                              </div>
+                              {dataset.createdAt && (
+                                <div className="text-xs text-muted-foreground">
+                                  {new Date(dataset.createdAt).toLocaleDateString()}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Model Selection */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Select Model</CardTitle>
-              <CardDescription>Choose a trained model for inference</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {loadingModels ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : models.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No trained models available.
-                </p>
+                  </CardContent>
+                </Card>
               ) : (
-                <div className="space-y-2 max-h-60 overflow-auto">
-                  {models.map((model, idx) => {
-                    const modelId = model.modelId || model._id || "";
-                    const isSelected = modelId === selectedModelId;
-                    const modelKey = modelId || `model-${idx}`;
-                    return (
-                      <button
-                        key={modelKey}
-                        onClick={() => handleModelSelect(modelId)}
-                        className={cn(
-                          "w-full text-left p-3 rounded-md border transition-colors",
-                          isSelected
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:bg-muted"
-                        )}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Test Inputs</CardTitle>
+                    <CardDescription>Upload custom images or use your camera for inference</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Drag & Drop Area */}
+                    <div
+                      className={cn(
+                        "border-2 border-dashed rounded-lg px-4 py-8 flex flex-col items-center justify-center text-center transition-colors cursor-pointer",
+                        isDragging
+                          ? "border-primary bg-primary/5"
+                          : "border-muted-foreground/30 bg-muted/20 hover:bg-muted/30"
+                      )}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragging(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        setIsDragging(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragging(false);
+                        handleAddTestFiles(e.dataTransfer.files);
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          const input = document.getElementById("prediction-test-files-input");
+                          if (input) {
+                            (input as HTMLInputElement).click();
+                          }
+                        }
+                      }}
+                    >
+                      <BrainCircuit className="h-8 w-8 text-primary mb-3" />
+                      <p className="text-sm font-medium">
+                        Drag &amp; drop test images here
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Supported formats: JPG, JPEG, PNG
+                      </p>
+                    </div>
+
+                    {/* Hidden file inputs for Select image / Select video */}
+                    <input
+                      id="prediction-test-files-input"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        handleAddTestFiles(e.target.files);
+                      }}
+                    />
+                    <input
+                      id="prediction-test-image-input"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        handleAddTestFiles(e.target.files);
+                      }}
+                    />
+
+                    {/* Action buttons */}
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex items-center gap-2"
+                        onClick={() => {
+                          const input = document.getElementById("prediction-test-image-input");
+                          if (input) {
+                            (input as HTMLInputElement).click();
+                          }
+                        }}
                       >
-                        <div className="font-medium">
-                          {model.name || model.modelVersion || model.modelId || "Unnamed Model"}
+                        <ImageIcon className="h-4 w-4" />
+                        Select image
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex items-center gap-2"
+                        onClick={() => {
+                          const input = document.getElementById("prediction-test-files-input");
+                          if (input) {
+                            (input as HTMLInputElement).click();
+                          }
+                        }}
+                      >
+                        <Video className="h-4 w-4" />
+                        Select multiple images
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex items-center gap-2"
+                        onClick={() => {
+                          toast({
+                            title: "Live camera",
+                            description: "Live camera input will be supported in a future update.",
+                          });
+                        }}
+                      >
+                        <Camera className="h-4 w-4" />
+                        Live camera
+                      </Button>
+                    </div>
+
+                    {/* Selected files summary (UI only) */}
+                    {testFiles.length > 0 && (
+                      <div className="mt-2 rounded-md bg-muted/40 border border-dashed border-muted-foreground/30 px-3 py-2 text-xs">
+                        <div className="font-medium mb-1">
+                          {testFiles.length} file{testFiles.length !== 1 ? "s" : ""} selected
                         </div>
-                        {model.metrics && (
-                          <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
-                            {model.metrics.mAP50 !== undefined && (
-                              <div>mAP50: {model.metrics.mAP50.toFixed(3)}</div>
-                            )}
-                            {model.metrics.precision !== undefined && (
-                              <div>Precision: {model.metrics.precision.toFixed(3)}</div>
-                            )}
-                            {model.metrics.recall !== undefined && (
-                              <div>Recall: {model.metrics.recall.toFixed(3)}</div>
-                            )}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                        <div className="space-y-0.5 max-h-20 overflow-auto">
+                          {testFiles.slice(0, 3).map((file) => (
+                            <div key={file.name} className="truncate text-muted-foreground">
+                              {file.name}
+                            </div>
+                          ))}
+                          {testFiles.length > 3 && (
+                            <div className="text-muted-foreground">
+                              + {testFiles.length - 3} more
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+
+              {/* Right: model selection (always visible) */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Select Model</CardTitle>
+                  <CardDescription>Choose a trained model for inference</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {loadingModels ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : models.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No trained models available.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-auto">
+                      {models.map((model, idx) => {
+                        const modelId = model.modelId || model._id || "";
+                        const isSelected = modelId === selectedModelId;
+                        const modelKey = modelId || `model-${idx}`;
+                        return (
+                          <button
+                            key={modelKey}
+                            onClick={() => handleModelSelect(modelId)}
+                            className={cn(
+                              "w-full text-left p-3 rounded-md border transition-colors",
+                              isSelected
+                                ? "border-primary bg-primary/5"
+                                : "border-border hover:bg-muted"
+                            )}
+                          >
+                            <div className="font-medium">
+                              {model.name || model.modelVersion || model.modelId || "Unnamed Model"}
+                            </div>
+                            {model.metrics && (
+                              <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                                {model.metrics.mAP50 !== undefined && (
+                                  <div>mAP50: {model.metrics.mAP50.toFixed(3)}</div>
+                                )}
+                                {model.metrics.precision !== undefined && (
+                                  <div>Precision: {model.metrics.precision.toFixed(3)}</div>
+                                )}
+                                {model.metrics.recall !== undefined && (
+                                  <div>Recall: {model.metrics.recall.toFixed(3)}</div>
+                                )}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
       {/* Confidence Threshold & Start Button */}
       {inferenceStatus === "idle" && selectedProjectId && (

@@ -18,10 +18,15 @@ export function ProfileProvider({ children }: ProfileProviderProps) {
   const [sessionReady, setSessionReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reloadProfileInProgress = useRef(false);
+  // Track in-flight profile loads so multiple callers share the same request
+  const loadProfilePromiseRef = useRef<Promise<void> | null>(null);
+  const lastProfileUserIdRef = useRef<string | null>(null);
 
   const loadProfile = useCallback(
     async (session: any) => {
-      if (!session?.user?.id) {
+      const userId = session?.user?.id as string | undefined;
+
+      if (!userId) {
         if (isDev) {
           console.log("[ProfileContext] No session.user.id, skipping profile fetch");
         }
@@ -30,17 +35,32 @@ export function ProfileProvider({ children }: ProfileProviderProps) {
         setCompany(null);
         setIsAdmin(false);
         setLoading(false);
+        lastProfileUserIdRef.current = null;
+        loadProfilePromiseRef.current = null;
         return;
       }
 
-      try {
-        setLoading(true);
-        setError(null);
-        const userId = session.user.id;
-
+      // If a profile load is already in flight for the same user, reuse it
+      if (
+        loadProfilePromiseRef.current &&
+        lastProfileUserIdRef.current === userId
+      ) {
         if (isDev) {
-          console.log("[ProfileContext] Fetching profile for user:", userId);
+          console.log("[ProfileContext] Reusing in-flight profile load for user:", userId);
         }
+        return loadProfilePromiseRef.current;
+      }
+
+      lastProfileUserIdRef.current = userId;
+
+      const loadPromise = (async () => {
+        try {
+          setLoading(true);
+          setError(null);
+
+          if (isDev) {
+            console.log("[ProfileContext] Fetching profile for user:", userId);
+          }
 
         // Add timeout to profile fetch to prevent infinite hanging
         const profileFetchPromise = supabase
@@ -56,120 +76,144 @@ export function ProfileProvider({ children }: ProfileProviderProps) {
           );
         });
 
-        // Add safety timeout wrapper
-        const profileSafetyTimeout = new Promise<{ data: any; error: any }>((resolve) => {
-          setTimeout(() => {
-            resolve({ data: null, error: new Error("Profile fetch safety timeout after 10 seconds") });
-          }, 10000);
-        });
+          // Add safety timeout wrapper
+          const profileSafetyTimeout = new Promise<{ data: any; error: any }>((resolve) => {
+            setTimeout(() => {
+              resolve({ data: null, error: new Error("Profile fetch safety timeout after 10 seconds") });
+            }, 10000);
+          });
 
-        const profileResult: any = await Promise.race([
-          Promise.race([
-            profileFetchPromise.then((r: any) => ({ data: r.data, error: r.error })),
-            profileTimeoutPromise,
-          ]),
-          profileSafetyTimeout,
-        ]);
+          const profileResult: any = await Promise.race([
+            Promise.race([
+              profileFetchPromise.then((r: any) => ({ data: r.data, error: r.error })),
+              profileTimeoutPromise,
+            ]),
+            profileSafetyTimeout,
+          ]);
 
-        const profileData = profileResult.data;
-        const profileError = profileResult.error;
+          const profileData = profileResult.data;
+          const profileError = profileResult.error;
 
-        if (profileError) throw profileError;
+          if (profileError) throw profileError;
 
-        if (!profileData) {
-          if (isDev) {
-            console.log("[ProfileContext] Profile not found for user:", userId);
+          if (!profileData) {
+            if (isDev) {
+              console.log("[ProfileContext] Profile not found for user:", userId);
+            }
+            setProfile(null);
+            setCompany(null);
+            setIsAdmin(false);
+            setLoading(false);
+            return;
           }
-          setProfile(null);
+
+          setProfile(profileData);
           setCompany(null);
           setIsAdmin(false);
-          setLoading(false);
-          return;
-        }
 
-        setProfile(profileData);
-        setCompany(null);
-        setIsAdmin(false);
+          if (profileData.company_id) {
+            let companyData: any = null;
+            let companyError: any = null;
 
-        if (profileData.company_id) {
-          let companyData: any = null;
-          let companyError: any = null;
+            try {
+              const companyFetchPromise = supabase
+                .from("companies")
+                .select("*")
+                .eq("id", profileData.company_id)
+                .maybeSingle();
 
-          try {
-            const companyFetchPromise = supabase
-              .from("companies")
-              .select("*")
-              .eq("id", profileData.company_id)
-              .maybeSingle();
+              // Create a timeout promise that will always reject after 10 seconds
+              const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(
+                  () => reject(new Error("Company fetch timeout after 10 seconds")),
+                  10000
+                );
+              });
 
-            // Create a timeout promise that will always reject after 10 seconds
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(
-                () => reject(new Error("Company fetch timeout after 10 seconds")),
-                10000
-              );
-            });
+              // Wrap Promise.race in a safety timeout to ensure it always resolves
+              const racePromise = Promise.race([
+                companyFetchPromise.then((r: any) => ({ data: r.data, error: r.error })),
+                timeoutPromise,
+              ]);
 
-            // Wrap Promise.race in a safety timeout to ensure it always resolves
-            const racePromise = Promise.race([
-              companyFetchPromise.then((r: any) => ({ data: r.data, error: r.error })),
-              timeoutPromise,
-            ]);
+              // Add an additional safety timeout wrapper to ensure we never hang forever
+              const safetyTimeout = new Promise<{ data: any; error: any }>((resolve) => {
+                setTimeout(() => {
+                  resolve({ data: null, error: new Error("Company fetch safety timeout after 12 seconds") });
+                }, 12000);
+              });
 
-            // Add an additional safety timeout wrapper to ensure we never hang forever
-            const safetyTimeout = new Promise<{ data: any; error: any }>((resolve) => {
-              setTimeout(() => {
-                resolve({ data: null, error: new Error("Company fetch safety timeout after 12 seconds") });
-              }, 12000);
-            });
+              const result: any = await Promise.race([
+                racePromise,
+                safetyTimeout,
+              ]);
 
-            const result: any = await Promise.race([
-              racePromise,
-              safetyTimeout,
-            ]);
+              companyData = result.data;
+              companyError = result.error;
+            } catch (timeoutError: any) {
+              console.error("[ProfileContext] Company fetch timeout or error:", timeoutError);
+              companyError = timeoutError;
+            }
 
-            companyData = result.data;
-            companyError = result.error;
-          } catch (timeoutError: any) {
-            console.error("[ProfileContext] Company fetch timeout or error:", timeoutError);
-            companyError = timeoutError;
-          }
+            if (companyError) {
+              console.error("[ProfileContext] Error loading company:", companyError);
+              if (isDev) {
+                console.log("[ProfileContext] Company fetch failed - continuing without company data");
+              }
+            }
 
-          if (companyError) {
-            console.error("[ProfileContext] Error loading company:", companyError);
-            if (isDev) {
-              console.log("[ProfileContext] Company fetch failed - continuing without company data");
+            if (companyData) {
+              setCompany(companyData);
+              const adminStatus = isUserAdmin(profileData, companyData);
+              setIsAdmin(adminStatus);
+              setProfile({ ...profileData, companies: companyData });
             }
           }
+        } catch (err: any) {
+          console.error("Error loading profile:", err);
+          const message = err?.message || "Failed to load profile";
+          const isTimeoutError =
+            message.includes("Profile fetch timeout after 8 seconds") ||
+            message.includes("Profile fetch safety timeout after 10 seconds");
 
-          if (companyData) {
-            setCompany(companyData);
-            const adminStatus = isUserAdmin(profileData, companyData);
-            setIsAdmin(adminStatus);
-            setProfile({ ...profileData, companies: companyData });
+          if (isTimeoutError) {
+            // Soft-handle profile timeouts: keep existing profile/company/admin state
+            // so the app doesn't temporarily behave as if the user has no profile.
+            setError(message);
+            if (isDev) {
+              console.warn("[ProfileContext] Profile fetch timeout - keeping existing profile state");
+            }
+          } else {
+            // For real errors, preserve existing behavior and clear profile-related state
+            setError(message);
+            setProfile(null);
+            setCompany(null);
+            setIsAdmin(false);
           }
-        }
-      } catch (err: any) {
-        console.error("Error loading profile:", err);
-        setError(err?.message || "Failed to load profile");
-        setProfile(null);
-        setCompany(null);
-        setIsAdmin(false);
-      } finally {
-        // Always ensure loading is set to false, even if something goes wrong
-        // Use setTimeout to ensure this runs even if the function is stuck
-        setTimeout(() => {
+        } finally {
+          // Always ensure loading is set to false, even if something goes wrong
+          // Use setTimeout to ensure this runs even if the function is stuck
+          setTimeout(() => {
+            setLoading(false);
+            if (isDev) {
+              console.log("[ProfileContext] loadProfile finally block executed, loading set to false");
+            }
+          }, 0);
+          
+          // Also set it immediately (in case setTimeout doesn't help)
           setLoading(false);
           if (isDev) {
-            console.log("[ProfileContext] loadProfile finally block executed, loading set to false");
+            console.log("[ProfileContext] loadProfile completed, loading set to false");
           }
-        }, 0);
-        
-        // Also set it immediately (in case setTimeout doesn't help)
-        setLoading(false);
-        if (isDev) {
-          console.log("[ProfileContext] loadProfile completed, loading set to false");
         }
+      })();
+
+      loadProfilePromiseRef.current = loadPromise;
+
+      try {
+        await loadPromise;
+      } finally {
+        loadProfilePromiseRef.current = null;
       }
     },
     [isDev]

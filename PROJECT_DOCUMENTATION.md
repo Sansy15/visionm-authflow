@@ -174,9 +174,13 @@ VisionM helps teams:
 ### 6. Inference/Prediction
 
 - **Model Selection**: Choose trained model
-- **Dataset Selection**: Select test dataset
-- **Run Inference**: Execute prediction jobs
+- **Inference Modes**:
+  - **Use Dataset**: Run inference against a dataset’s test folder
+  - **Upload Custom Images**: Run inference on ad-hoc uploaded images
+- **Dataset Selection** (dataset mode): Select a ready dataset that has test images
+- **Custom Test Inputs** (custom mode): Drag-and-drop or select images to upload
 - **Confidence Threshold**: Configure detection confidence
+- **Run Inference**: Execute prediction jobs
 - **Result Visualization**: View annotated images
 - **History**: Track past inference jobs
 - **Delete Results**: Remove inference job results
@@ -520,8 +524,17 @@ Example: `http://localhost:3000/api` or `https://api.visionm.com/api`
 #### Start Inference
 - **Endpoint**: `POST /api/inference/start`
 - **Method**: POST
-- **Body**: `{ modelId, datasetId, confidenceThreshold }`
-- **Response**: `{ inferenceId, status }`
+- **Modes**:
+  - **Dataset-based inference (JSON)**:
+    - **Body**: `{ modelId, datasetId, confidenceThreshold }`
+    - **Notes**: Used when the user selects “Use dataset” and picks a dataset with test images.
+  - **Custom upload inference (multipart/form-data)**:
+    - **Form fields**:
+      - `modelId` (text, required)
+      - `confidenceThreshold` (text, optional)
+      - `images` (file, required) — one entry per uploaded image
+    - **Notes**: Used when the user selects “Upload custom images”; images are uploaded temporarily and cleaned up by the backend after inference.
+- **Response**: `{ inferenceId, status, ... }` (includes at least the queued status and an ID to poll)
 
 #### Get Inference Status
 - **Endpoint**: `GET /api/inference/:inferenceId/status`
@@ -823,11 +836,13 @@ Comprehensive dataset management:
 
 #### `PredictionPage.tsx`
 Inference/prediction interface:
-- Model selection
-- Dataset selection
-- Job execution
-- Result visualization
-- History tracking
+- Project and model selection
+- **Inference mode toggle**:
+  - **Use dataset** → shows a “Select Dataset” card listing ready datasets with test images
+  - **Upload custom images** → shows a “Test Inputs” card with drag-and-drop and image selection
+- Confidence threshold controls (number input + slider)
+- Job execution and status polling
+- Result visualization and history tracking
 
 #### `SimulationView.tsx`
 Model training interface:
@@ -1187,6 +1202,6 @@ refactor: Simplify authentication flow
 
 ---
 
-**Last Updated**: December 2024  
+**Last Updated**: 18th December 2025  
 **Version**: 1.0.0  
 **Maintainer**: VisionM Development Team
