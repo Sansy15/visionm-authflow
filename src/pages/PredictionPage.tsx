@@ -104,15 +104,27 @@ interface InferenceResults {
     avgConfidence?: number; // Backend uses "avgConfidence"
     averageConfidence?: number; // Fallback
   }>;
-  annotatedImages: Array<{
+  // Support both new structure (object with good/defect/all) and old structure (flat array)
+  annotatedImages: {
+    good: Array<{ filename: string; url: string; tag: 'good' }>;
+    defect: Array<{ filename: string; url: string; tag: 'defect' }>;
+    all: Array<{ filename: string; url: string; tag: 'good' | 'defect' | 'unreviewed' }>;
+  } | Array<{
     filename: string;
     url: string;
+    tag?: string;
     detections?: Array<{
       className: string;
       confidence: number;
       bbox?: number[];
     }>;
   }>;
+  statistics?: {
+    total: number;
+    good: number;
+    defect: number;
+    hasTags: boolean; // Indicates if job has tagging (new jobs)
+  };
 }
 
 interface InferenceJob {
@@ -194,6 +206,9 @@ const PredictionPage = () => {
   const [loadingPastInferences, setLoadingPastInferences] = useState(false);
   const [selectedPastInferenceId, setSelectedPastInferenceId] = useState<string | null>(null);
   const [historyStatusFilter, setHistoryStatusFilter] = useState<string>("all");
+  
+  // Image filter state for tagged inference results
+  const [imageFilter, setImageFilter] = useState<'all' | 'good' | 'defect'>('all');
 
   // Inference mode: dataset-based vs custom upload
   const [inferenceMode, setInferenceMode] = useState<InferenceMode>("dataset");
@@ -848,12 +863,54 @@ const PredictionPage = () => {
     navigate(`/project/prediction/history/${encodeURIComponent(inferenceId)}`);
   };
 
+  // Helper function to normalize annotated images from either structure
+  const normalizeAnnotatedImages = (
+    images: any,
+    inferenceId: string
+  ): Array<{ filename: string; url: string; tag: string; detections?: any[] }> => {
+    if (!images) return [];
+    
+    // Check if new structure (object with good/defect/all)
+    if (images && typeof images === 'object' && !Array.isArray(images) && 'all' in images) {
+      // New structure: use 'all' array (already filtered by backend)
+      const allImages = images.all || [];
+      return allImages.map((img: any) => {
+        const rawPath =
+          img.url && img.url.startsWith("/api/")
+            ? img.url.slice(4)
+            : img.url ||
+              `/inference/${encodeURIComponent(inferenceId)}/image/${encodeURIComponent(img.filename)}`;
+        return {
+          ...img,
+          url: apiUrl(rawPath),
+          tag: img.tag || 'unreviewed',
+        };
+      });
+    } else if (Array.isArray(images)) {
+      // Old structure: flat array
+      return images.map((img: any) => {
+        const rawPath =
+          img.url && img.url.startsWith("/api/")
+            ? img.url.slice(4)
+            : img.url ||
+              `/inference/${encodeURIComponent(inferenceId)}/image/${encodeURIComponent(img.filename)}`;
+        return {
+          ...img,
+          url: apiUrl(rawPath),
+          tag: img.tag || 'unreviewed',
+        };
+      });
+    }
+    
+    return [];
+  };
+
   // Fetch results
-  const fetchResults = async (id: string) => {
+  const fetchResults = async (id: string, filter: 'all' | 'good' | 'defect' = 'all') => {
     setLoadingResults(true);
     try {
       const headers = await getAuthHeaders();
-      const url = apiUrl(`/inference/${encodeURIComponent(id)}/results`);
+      const url = apiUrl(`/inference/${encodeURIComponent(id)}/results?filter=${filter}`);
       const res = await fetch(url, { headers });
 
       if (!res.ok) {
@@ -870,34 +927,26 @@ const PredictionPage = () => {
       const response = await res.json();
       // Backend returns nested structure: { results: { ... } }
       // Extract the inner results object
-      const data: InferenceResults = response.results || response;
+      const data = response.results || response;
+
+      // Normalize annotated images from either structure
+      const normalizedImages = normalizeAnnotatedImages(data.annotatedImages, id);
 
       // Normalize detectionsByClass to use consistent field names
-      // and ensure annotatedImages always have a usable URL
       const normalizedData: InferenceResults = {
         ...data,
         detectionsByClass:
-          data.detectionsByClass?.map((item) => ({
+          data.detectionsByClass?.map((item: any) => ({
             ...item,
             averageConfidence: item.avgConfidence ?? item.averageConfidence ?? 0,
           })) || [],
-        annotatedImages:
-          data.annotatedImages?.map((img) => {
-            // If backend provided a URL starting with "/api/", strip the leading "/api"
-            // before passing to apiUrl, because API_BASE_URL already includes "/api".
-            const rawPath =
-              img.url && img.url.startsWith("/api/")
-                ? img.url.slice(4) // remove leading "/api"
-                : img.url ||
-                  `/inference/${encodeURIComponent(id)}/image/${encodeURIComponent(
-                    img.filename,
-                  )}`;
-
-            return {
-              ...img,
-              url: apiUrl(rawPath),
-            };
-          }) || [],
+        annotatedImages: normalizedImages,
+        statistics: data.statistics || {
+          total: normalizedImages.length,
+          good: 0,
+          defect: 0,
+          hasTags: false,
+        },
       };
 
       setResults(normalizedData);
@@ -1039,6 +1088,20 @@ const PredictionPage = () => {
       setStartingInference(false);
     }
   };
+
+  // Refetch results when filter changes (only for new jobs with tags)
+  useEffect(() => {
+    if (!inferenceId || !results || results.statistics?.hasTags !== true) return;
+    if (inferenceStatus !== 'completed') return;
+    
+    // Debounce to avoid too many requests
+    const timeoutId = setTimeout(() => {
+      void fetchResults(inferenceId, imageFilter);
+    }, 300);
+    
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageFilter]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -1685,6 +1748,23 @@ const PredictionPage = () => {
                       <div className="text-sm text-muted-foreground">Classes Detected</div>
                     </div>
                   </div>
+                  {/* Statistics row for tagged inference jobs */}
+                  {results.statistics && results.statistics.hasTags && (
+                    <div className="grid gap-4 md:grid-cols-3 mt-4 pt-4 border-t">
+                      <div>
+                        <div className="text-2xl font-bold">{results.statistics.total}</div>
+                        <div className="text-sm text-muted-foreground">Total Images</div>
+                      </div>
+                      <div>
+                        <div className="text-2xl font-bold text-green-600">{results.statistics.good}</div>
+                        <div className="text-sm text-muted-foreground">Good Images</div>
+                      </div>
+                      <div>
+                        <div className="text-2xl font-bold text-red-600">{results.statistics.defect}</div>
+                        <div className="text-sm text-muted-foreground">Defect Images</div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -1721,43 +1801,181 @@ const PredictionPage = () => {
                 </Card>
               )}
 
-              {/* Annotated Images */}
-              {results.annotatedImages && results.annotatedImages.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Annotated Images</CardTitle>
-                    <CardDescription>
-                      {results.annotatedImages.length} image
-                      {results.annotatedImages.length !== 1 ? "s" : ""} with detections
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                      {results.annotatedImages.map((img, idx) => (
-                        <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
-                          <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
-                            <img
-                              src={img.url}
-                              alt={img.filename}
-                              className="w-full h-full object-contain"
-                              loading="lazy"
-                            />
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            {img.filename}
-                          </div>
-                          {img.detections && img.detections.length > 0 && (
-                            <div className="text-xs text-muted-foreground">
-                              {img.detections.length} detection
-                              {img.detections.length !== 1 ? "s" : ""}
+              {/* Annotated Images with Filter Tabs */}
+              {(() => {
+                // Get images array (handle both old and new structures)
+                const imagesArray = Array.isArray(results.annotatedImages)
+                  ? results.annotatedImages
+                  : results.annotatedImages && typeof results.annotatedImages === 'object' && 'all' in results.annotatedImages
+                  ? results.annotatedImages.all
+                  : [];
+                
+                if (imagesArray.length === 0) return null;
+                
+                // Determine if we should show filter tabs (only for new jobs with tags)
+                const showFilters = results.statistics?.hasTags === true;
+                
+                // Get images to display based on filter
+                let imagesToDisplay = imagesArray;
+                if (showFilters && imageFilter !== 'all') {
+                  imagesToDisplay = imagesArray.filter((img: any) => img.tag === imageFilter);
+                }
+                
+                return (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Annotated Images</CardTitle>
+                      <CardDescription>
+                        {showFilters
+                          ? `${results.statistics?.total || imagesArray.length} total images`
+                          : `${imagesArray.length} image${imagesArray.length !== 1 ? "s" : ""} with detections`
+                        }
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {showFilters ? (
+                        <Tabs value={imageFilter} onValueChange={(value) => setImageFilter(value as 'all' | 'good' | 'defect')}>
+                          <TabsList className="grid w-full max-w-md grid-cols-3 mb-4">
+                            <TabsTrigger value="all">
+                              All ({results.statistics?.total || 0})
+                            </TabsTrigger>
+                            <TabsTrigger value="good">
+                              Good ({results.statistics?.good || 0})
+                            </TabsTrigger>
+                            <TabsTrigger value="defect">
+                              Defect ({results.statistics?.defect || 0})
+                            </TabsTrigger>
+                          </TabsList>
+                          
+                          <TabsContent value="all" className="mt-0">
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                              {imagesArray.map((img: any, idx: number) => (
+                                <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
+                                  <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
+                                    <img
+                                      src={img.url}
+                                      alt={img.filename}
+                                      className="w-full h-full object-contain"
+                                      loading="lazy"
+                                    />
+                                    {img.tag && img.tag !== 'unreviewed' && (
+                                      <Badge
+                                        variant="outline"
+                                        className={
+                                          img.tag === 'good'
+                                            ? "bg-green-50 text-green-700 border-green-200 absolute top-2 right-2"
+                                            : "bg-red-50 text-red-700 border-red-200 absolute top-2 right-2"
+                                        }
+                                      >
+                                        {img.tag === 'good' ? '✅ Good' : '❌ Defect'}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground truncate">
+                                    {img.filename}
+                                  </div>
+                                  {img.detections && img.detections.length > 0 && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {img.detections.length} detection
+                                      {img.detections.length !== 1 ? "s" : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                             </div>
-                          )}
+                          </TabsContent>
+                          <TabsContent value="good" className="mt-0">
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                              {imagesArray.filter((img: any) => img.tag === 'good').map((img: any, idx: number) => (
+                                <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
+                                  <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
+                                    <img
+                                      src={img.url}
+                                      alt={img.filename}
+                                      className="w-full h-full object-contain"
+                                      loading="lazy"
+                                    />
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-green-50 text-green-700 border-green-200 absolute top-2 right-2"
+                                    >
+                                      ✅ Good
+                                    </Badge>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground truncate">
+                                    {img.filename}
+                                  </div>
+                                  {img.detections && img.detections.length > 0 && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {img.detections.length} detection
+                                      {img.detections.length !== 1 ? "s" : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </TabsContent>
+                          <TabsContent value="defect" className="mt-0">
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                              {imagesArray.filter((img: any) => img.tag === 'defect').map((img: any, idx: number) => (
+                                <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
+                                  <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
+                                    <img
+                                      src={img.url}
+                                      alt={img.filename}
+                                      className="w-full h-full object-contain"
+                                      loading="lazy"
+                                    />
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-red-50 text-red-700 border-red-200 absolute top-2 right-2"
+                                    >
+                                      ❌ Defect
+                                    </Badge>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground truncate">
+                                    {img.filename}
+                                  </div>
+                                  {img.detections && img.detections.length > 0 && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {img.detections.length} detection
+                                      {img.detections.length !== 1 ? "s" : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </TabsContent>
+                        </Tabs>
+                      ) : (
+                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                          {imagesArray.map((img: any, idx: number) => (
+                            <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
+                              <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
+                                <img
+                                  src={img.url}
+                                  alt={img.filename}
+                                  className="w-full h-full object-contain"
+                                  loading="lazy"
+                                />
+                              </div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {img.filename}
+                              </div>
+                              {img.detections && img.detections.length > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  {img.detections.length} detection
+                                  {img.detections.length !== 1 ? "s" : ""}
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })()}
             </>
           ) : (
             <Card>

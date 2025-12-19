@@ -11,3 +11,5 @@ Inference,/inference/{inferenceId}/results,GET,"PredictionPage.tsx (fetchResults
 Inference,/inference/{inferenceId}/status,GET,PredictionPage.tsx (checkInferenceStatus),Every 2-3 seconds while inference is active (polling) once on page reload,Path: inferenceId,Returns inference status: { status, progress, processedImages, totalImages, ... }
 Inference,/inference/{inferenceId}/cancel,POST,PredictionPage.tsx (cancelInference),When user clicks 'Cancel' during queued/running state,Path: inferenceId,Requests inference job cancellation; returns new status. Error 400 if cannot cancel.
 Inference,/inference/{inferenceId},DELETE,PredictionPage.tsx (deleteInference),When user confirms deletion of inference results,Path: inferenceId,"Permanently deletes inference job and results. Error 400 if job is running/queued."
+
+
