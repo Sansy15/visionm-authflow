@@ -168,6 +168,17 @@ interface InferenceJob {
   updatedAt?: string;
 }
 
+interface LiveFrameResponse {
+  annotatedImage: string; // base64 data URL
+  detections: Array<{
+    class: string;
+    confidence: number;
+    bbox: [number, number, number, number]; // [x1, y1, x2, y2]
+  }>;
+  totalDetections: number;
+  processingTime?: number;
+}
+
 const STORAGE_PREFIX = "prediction_";
 type InferenceMode = "dataset" | "custom";
 
@@ -217,9 +228,30 @@ const PredictionPage = () => {
   const [testFiles, setTestFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Live camera inference state
+  const [liveCameraMode, setLiveCameraMode] = useState<boolean>(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraPermission, setCameraPermission] = useState<'idle' | 'requesting' | 'granted' | 'denied'>('idle');
+  const [liveInferenceId, setLiveInferenceId] = useState<string | null>(null);
+  const [isLiveInferenceRunning, setIsLiveInferenceRunning] = useState<boolean>(false);
+  const [annotatedFrame, setAnnotatedFrame] = useState<string | null>(null); // base64 image URL
+  const [frameKey, setFrameKey] = useState<number>(0); // Key to force image re-render
+  const [currentDetections, setCurrentDetections] = useState<number>(0);
+  const [isProcessingFrame, setIsProcessingFrame] = useState<boolean>(false);
+  const [fps, setFps] = useState<number>(0); // Optional: FPS counter
+
   // Refs
   const pollIntervalRef = useRef<number | null>(null);
   const projectIdRef = useRef<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const annotatedCanvasRef = useRef<HTMLCanvasElement>(null);
+  const captureIntervalRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number>(0);
+  const pendingFrameRequestRef = useRef<boolean>(false);
+  const liveInferenceIdRef = useRef<string | null>(null);
+  const isLiveInferenceRunningRef = useRef<boolean>(false);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
 
   const navigate = useNavigate();
 
@@ -554,6 +586,637 @@ const PredictionPage = () => {
     const clamped = Math.max(0, Math.min(1, value));
     setConfidenceThreshold(clamped);
     saveToStorage("confidenceThreshold", clamped);
+  };
+
+  // Request camera access
+  const requestCameraAccess = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast({
+        title: "Camera not supported",
+        description: "Your browser does not support camera access.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    setCameraPermission('requesting');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'user', // Front camera (laptop)
+        },
+      });
+
+      setCameraStream(stream);
+      cameraStreamRef.current = stream; // Also store in ref
+      setCameraPermission('granted');
+      
+      // Attach stream to video element and wait for it to be ready
+      if (videoRef.current) {
+        const video = videoRef.current;
+        video.srcObject = stream;
+        
+        // For live streams, use 'playing' event instead of 'loadedmetadata'
+        // Live streams don't always fire loadedmetadata reliably
+        return new Promise<boolean>((resolve) => {
+          let resolved = false;
+          
+          const onPlaying = () => {
+            if (resolved) return;
+            resolved = true;
+            video.removeEventListener('playing', onPlaying);
+            video.removeEventListener('loadedmetadata', onLoadedMetadata);
+            video.removeEventListener('canplay', onCanPlay);
+            video.removeEventListener('error', onError);
+            
+            // Give it a moment to ensure dimensions are set
+            setTimeout(() => {
+              if (video.videoWidth > 0 && video.videoHeight > 0) {
+                console.log(`Video ready: ${video.videoWidth}x${video.videoHeight}`);
+                resolve(true);
+              } else {
+                console.warn("Video element has zero dimensions after playing");
+                // Still resolve true - dimensions might update later
+                resolve(true);
+              }
+            }, 100);
+          };
+
+          const onLoadedMetadata = () => {
+            if (resolved) return;
+            // If metadata loads, check dimensions
+            if (video.videoWidth > 0 && video.videoHeight > 0) {
+              console.log(`Video metadata loaded: ${video.videoWidth}x${video.videoHeight}`);
+              if (!resolved) {
+                resolved = true;
+                video.removeEventListener('playing', onPlaying);
+                video.removeEventListener('loadedmetadata', onLoadedMetadata);
+                video.removeEventListener('canplay', onCanPlay);
+                video.removeEventListener('error', onError);
+                resolve(true);
+              }
+            }
+          };
+
+          const onCanPlay = () => {
+            if (resolved) return;
+            // Try to play if not already playing
+            if (video.paused) {
+              video.play().catch((err) => {
+                console.error("Error playing video in canplay:", err);
+              });
+            }
+          };
+
+          const onError = (err: Event) => {
+            if (resolved) return;
+            resolved = true;
+            video.removeEventListener('playing', onPlaying);
+            video.removeEventListener('loadedmetadata', onLoadedMetadata);
+            video.removeEventListener('canplay', onCanPlay);
+            video.removeEventListener('error', onError);
+            console.error("Video element error:", err);
+            resolve(false);
+          };
+
+          // Add multiple event listeners for better compatibility
+          video.addEventListener('playing', onPlaying);
+          video.addEventListener('loadedmetadata', onLoadedMetadata);
+          video.addEventListener('canplay', onCanPlay);
+          video.addEventListener('error', onError);
+          
+          // Start playing
+          video.play().catch((err) => {
+            console.error("Error starting video playback:", err);
+            if (!resolved) {
+              resolved = true;
+              video.removeEventListener('playing', onPlaying);
+              video.removeEventListener('loadedmetadata', onLoadedMetadata);
+              video.removeEventListener('canplay', onCanPlay);
+              video.removeEventListener('error', onError);
+              resolve(false);
+            }
+          });
+
+          // Timeout after 5 seconds
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              video.removeEventListener('playing', onPlaying);
+              video.removeEventListener('loadedmetadata', onLoadedMetadata);
+              video.removeEventListener('canplay', onCanPlay);
+              video.removeEventListener('error', onError);
+              console.warn("Video readiness timeout");
+              // Still resolve true - video might work anyway
+              resolve(true);
+            }
+          }, 5000);
+        });
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error("Camera access error:", err);
+      setCameraPermission('denied');
+      setCameraStream(null);
+      cameraStreamRef.current = null;
+      
+      let errorMessage = "Failed to access camera.";
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMessage = "Camera permission denied. Please allow camera access in your browser settings.";
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMessage = "No camera found. Please connect a camera and try again.";
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMessage = "Camera is already in use by another application.";
+      }
+
+      toast({
+        title: "Camera access failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      return false;
+    }
+  };
+
+  // Stop camera stream
+  const stopCameraStream = () => {
+    // Only stop if we're actually stopping inference
+    // Don't stop camera when just starting or during normal operation
+    if (cameraStream && !isLiveInferenceRunningRef.current) {
+      console.log("Stopping camera stream");
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    // Don't clear video srcObject if inference is still running
+    if (videoRef.current && !isLiveInferenceRunningRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    if (!isLiveInferenceRunningRef.current) {
+      setCameraPermission('idle');
+    }
+  };
+
+  // Capture frame from video
+  const captureFrame = (): string | null => {
+    if (!videoRef.current) {
+      console.warn("captureFrame: videoRef.current is null");
+      return null;
+    }
+
+    if (!canvasRef.current) {
+      console.warn("captureFrame: canvasRef.current is null");
+      return null;
+    }
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    
+    // Validate video is ready and has valid dimensions
+    if (video.readyState < 2) {
+      // Video not ready (HAVE_CURRENT_DATA = 2)
+      console.warn("captureFrame: video not ready, readyState:", video.readyState);
+      return null;
+    }
+
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      // Video has no dimensions yet
+      console.warn("captureFrame: video has zero dimensions", {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight
+      });
+      return null;
+    }
+    
+    // Set canvas dimensions to match video (or scaled down for optimization)
+    const targetWidth = 640; // Optimize: reduce resolution
+    const targetHeight = 480;
+    
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    // Draw video frame to canvas
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      console.warn("captureFrame: failed to get canvas context");
+      return null;
+    }
+
+    try {
+      ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+      // Convert to base64 JPEG (quality 0.8 for compression)
+      const base64 = canvas.toDataURL('image/jpeg', 0.8);
+      
+      // Validate base64 string
+      if (!base64 || base64.length < 100) {
+        console.warn("captureFrame: invalid base64 string", base64?.substring(0, 50));
+        return null;
+      }
+      
+      return base64;
+    } catch (err) {
+      console.error("Error capturing frame:", err);
+      return null;
+    }
+  };
+
+  // Process frame with backend
+  const processFrame = async (frameBase64: string, inferenceId?: string) => {
+    const currentInferenceId = inferenceId || liveInferenceId;
+    if (!currentInferenceId) {
+      console.warn("processFrame: no inferenceId");
+      return;
+    }
+
+    // Skip if previous request is still pending to avoid overwhelming backend
+    // But log it so we know frames are being skipped
+    if (pendingFrameRequestRef.current) {
+      // Skip this frame - previous one still processing
+      // This is normal if backend is slow
+      return;
+    }
+
+    pendingFrameRequestRef.current = true;
+    setIsProcessingFrame(true);
+
+    try {
+      const headers = await getAuthHeaders();
+      const url = apiUrl(`/inference/live/${encodeURIComponent(currentInferenceId)}/frame`);
+      
+      console.log("Sending frame to backend:", {
+        url,
+        frameSize: frameBase64.length,
+        inferenceId: currentInferenceId,
+        timestamp: new Date().toISOString()
+      });
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: frameBase64,
+          confidenceThreshold: confidenceThreshold,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMsg = errorData.error || `Frame processing failed: ${res.status}`;
+        console.error("Frame processing failed:", errorMsg, res.status);
+        throw new Error(errorMsg);
+      }
+
+      const data: LiveFrameResponse = await res.json();
+      console.log("Frame processed successfully:", {
+        totalDetections: data.totalDetections,
+        hasAnnotatedImage: !!data.annotatedImage,
+        imageLength: data.annotatedImage?.length || 0,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Update annotated frame and detections
+      // Draw directly to canvas for better performance and smooth updates
+      if (annotatedCanvasRef.current && data.annotatedImage) {
+        const canvas = annotatedCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const img = new Image();
+          img.onload = () => {
+            // Set canvas size to match image, but maintain aspect ratio for display
+            const maxWidth = 1280;
+            const maxHeight = 720;
+            const aspectRatio = img.width / img.height;
+            
+            let canvasWidth = img.width;
+            let canvasHeight = img.height;
+            
+            if (canvasWidth > maxWidth) {
+              canvasWidth = maxWidth;
+              canvasHeight = canvasWidth / aspectRatio;
+            }
+            if (canvasHeight > maxHeight) {
+              canvasHeight = maxHeight;
+              canvasWidth = canvasHeight * aspectRatio;
+            }
+            
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+          };
+          img.onerror = (err) => {
+            console.error("Error loading annotated image:", err);
+          };
+          img.src = data.annotatedImage;
+        }
+      }
+      
+      // Also update state for compatibility
+      setFrameKey(prev => prev + 1);
+      setAnnotatedFrame(data.annotatedImage);
+      setCurrentDetections(data.totalDetections);
+      
+      // Optional: Update FPS calculation
+      const now = Date.now();
+      const elapsed = now - lastFrameTimeRef.current;
+      if (elapsed > 0) {
+        setFps(Math.round(1000 / elapsed));
+      }
+      lastFrameTimeRef.current = now;
+
+    } catch (err: any) {
+      console.error("Frame processing error:", err);
+      // Don't show toast for every frame error to avoid spam
+      // Only show for critical errors
+      if (err?.message?.includes('404') || err?.message?.includes('inference')) {
+        toast({
+          title: "Inference stopped",
+          description: "The live inference session has ended.",
+          variant: "destructive",
+        });
+        handleStopLiveInference();
+      }
+    } finally {
+      setIsProcessingFrame(false);
+      pendingFrameRequestRef.current = false;
+    }
+  };
+
+  // Start frame capture loop
+  const startFrameCaptureLoop = (inferenceId: string) => {
+    if (captureIntervalRef.current) {
+      clearInterval(captureIntervalRef.current);
+    }
+
+    // Store in ref immediately so it's available in the closure
+    liveInferenceIdRef.current = inferenceId;
+    isLiveInferenceRunningRef.current = true;
+
+    // Verify video is ready before starting
+    if (!videoRef.current) {
+      console.warn("Video element not available for frame capture");
+      return;
+    }
+
+    const video = videoRef.current;
+    console.log("Starting frame capture loop", {
+      readyState: video.readyState,
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      inferenceId
+    });
+
+    if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+      console.warn("Video not ready yet, waiting for video to be ready...", {
+        readyState: video.readyState,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight
+      });
+      // Wait a bit and retry
+      setTimeout(() => {
+        if (isLiveInferenceRunningRef.current && liveInferenceIdRef.current) {
+          startFrameCaptureLoop(liveInferenceIdRef.current);
+        }
+      }, 500);
+      return;
+    }
+
+    // Target: 10-15 FPS (capture every 66-100ms)
+    const captureInterval = 100; // 10 FPS (100ms)
+    
+    let frameCount = 0;
+    
+    // Define capture function that will be called by interval
+    const captureAndProcess = () => {
+      // Use refs instead of state - they're immediately available
+      const currentInferenceId = liveInferenceIdRef.current;
+      const isRunning = isLiveInferenceRunningRef.current;
+      
+      if (!isRunning || !currentInferenceId) {
+        console.log("Stopping capture loop - inference not running", {
+          isRunning,
+          currentInferenceId
+        });
+        if (captureIntervalRef.current) {
+          clearInterval(captureIntervalRef.current);
+          captureIntervalRef.current = null;
+        }
+        return;
+      }
+      
+      // Double-check video is still ready
+      if (!videoRef.current) {
+        console.warn("Video element lost during capture");
+        return;
+      }
+
+      const currentVideo = videoRef.current;
+      if (currentVideo.readyState < 2 || 
+          currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+        if (frameCount < 3) {
+          console.warn("Video not ready during capture", {
+            readyState: currentVideo.readyState,
+            videoWidth: currentVideo.videoWidth,
+            videoHeight: currentVideo.videoHeight
+          });
+        }
+        return;
+      }
+      
+      const frame = captureFrame();
+      if (frame) {
+        frameCount++;
+        if (frameCount <= 5 || frameCount % 10 === 0) {
+          console.log(`[Frame ${frameCount}] Captured frame, size: ${frame.length} bytes`);
+        }
+        // Use currentInferenceId from ref
+        void processFrame(frame, currentInferenceId);
+      } else {
+        if (frameCount < 5) {
+          console.warn(`[Frame ${frameCount}] captureFrame returned null`);
+        }
+      }
+    };
+
+    // Initial capture
+    console.log("Starting initial frame capture...");
+    captureAndProcess();
+
+    // Set up interval - this will continue capturing frames continuously
+    // Use arrow function to maintain closure over captureAndProcess
+    captureIntervalRef.current = setInterval(() => {
+      // Double-check we're still running using refs
+      if (!isLiveInferenceRunningRef.current || !liveInferenceIdRef.current) {
+        console.log("Stopping capture loop - inference stopped");
+        if (captureIntervalRef.current) {
+          clearInterval(captureIntervalRef.current);
+          captureIntervalRef.current = null;
+        }
+        return;
+      }
+      // Call the capture function
+      captureAndProcess();
+    }, captureInterval) as unknown as number;
+    
+    console.log("Frame capture loop started with interval:", captureInterval, "ms");
+  };
+
+  // Start live inference
+  const handleStartLiveInference = async () => {
+    if (!selectedModelId) {
+      toast({
+        title: "Model required",
+        description: "Please select a model before starting live inference.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Request camera access first and wait for video to be ready
+    const cameraGranted = await requestCameraAccess();
+    if (!cameraGranted) {
+      toast({
+        title: "Camera not ready",
+        description: "Failed to initialize camera. Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Additional check: ensure video element has valid dimensions
+    if (videoRef.current) {
+      const video = videoRef.current;
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        // Wait a bit more for video to initialize
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        if (video.videoWidth === 0 || video.videoHeight === 0) {
+          toast({
+            title: "Camera initialization failed",
+            description: "Camera stream is not ready. Please try again.",
+            variant: "destructive",
+          });
+          stopCameraStream();
+          return;
+        }
+      }
+    }
+
+    setStartingInference(true);
+    try {
+      const headers = await getAuthHeaders();
+      const url = apiUrl('/inference/live/start');
+      
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          modelId: selectedModelId,
+          confidenceThreshold: confidenceThreshold,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to start live inference: ${res.status}`);
+      }
+
+      const data = await res.json();
+      const newInferenceId = data.inferenceId;
+      
+      if (!newInferenceId) {
+        throw new Error("No inference ID returned from server");
+      }
+
+      // Update refs immediately (before state updates)
+      liveInferenceIdRef.current = newInferenceId;
+      isLiveInferenceRunningRef.current = true;
+
+      // Set state
+      setLiveInferenceId(newInferenceId);
+      setIsLiveInferenceRunning(true);
+      setAnnotatedFrame(null);
+      setCurrentDetections(0);
+
+      toast({
+        title: "Live inference started",
+        description: "Camera feed is now being processed in real-time.",
+      });
+
+      // Start frame capture loop immediately with the inferenceId
+      // Refs are already set, so the loop will work
+      startFrameCaptureLoop(newInferenceId);
+
+    } catch (err: any) {
+      console.error("Error starting live inference:", err);
+      toast({
+        title: "Failed to start live inference",
+        description: err?.message || "An unexpected error occurred.",
+        variant: "destructive",
+      });
+      stopCameraStream();
+    } finally {
+      setStartingInference(false);
+    }
+  };
+
+  // Stop live inference
+  const handleStopLiveInference = async () => {
+    // Stop frame capture loop
+    if (captureIntervalRef.current) {
+      clearInterval(captureIntervalRef.current);
+      captureIntervalRef.current = null;
+    }
+
+    // Update refs immediately
+    isLiveInferenceRunningRef.current = false;
+    const currentInferenceId = liveInferenceIdRef.current;
+
+    // Stop camera stream
+    stopCameraStream();
+
+    // Stop backend inference if inferenceId exists
+    if (currentInferenceId) {
+      try {
+        const headers = await getAuthHeaders();
+        const url = apiUrl(`/inference/live/${encodeURIComponent(currentInferenceId)}/stop`);
+        
+        await fetch(url, {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json',
+          },
+        });
+      } catch (err) {
+        console.error("Error stopping live inference:", err);
+        // Don't show error toast - user is stopping anyway
+      }
+    }
+
+    // Reset state and refs
+    setLiveInferenceId(null);
+    setIsLiveInferenceRunning(false);
+    setAnnotatedFrame(null);
+    setFrameKey(0);
+    setCurrentDetections(0);
+    setFps(0);
+    pendingFrameRequestRef.current = false;
+    liveInferenceIdRef.current = null;
+
+    toast({
+      title: "Live inference stopped",
+      description: "Camera feed processing has been stopped.",
+    });
   };
 
   // Check inference status
@@ -964,6 +1627,16 @@ const PredictionPage = () => {
 
   // Start inference
   const handleStartInference = async () => {
+    // Check if live camera is active
+    if (liveCameraMode) {
+      toast({
+        title: "Live camera active",
+        description: "Please stop live camera inference before starting a new inference job.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Model is always required
     if (!selectedModelId) {
       toast({
@@ -1113,6 +1786,87 @@ const PredictionPage = () => {
     };
   }, []);
 
+  // Cleanup live camera on unmount only (not on state changes)
+  useEffect(() => {
+    return () => {
+      // Only cleanup on component unmount, not on state changes
+      console.log("Component unmounting - cleaning up live camera");
+      
+      // Stop frame capture
+      if (captureIntervalRef.current) {
+        clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
+      
+      // Stop camera stream using refs (not state) to avoid dependency issues
+      const currentStream = cameraStreamRef.current;
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        cameraStreamRef.current = null;
+      }
+      
+      // Try to stop backend inference if running (fire and forget)
+      const currentInferenceId = liveInferenceIdRef.current;
+      const isRunning = isLiveInferenceRunningRef.current;
+      if (currentInferenceId && isRunning) {
+        getAuthHeaders().then(headers => {
+          const url = apiUrl(`/inference/live/${encodeURIComponent(currentInferenceId)}/stop`);
+          fetch(url, {
+            method: 'POST',
+            headers: {
+              ...headers,
+              'Content-Type': 'application/json',
+            },
+          }).catch(() => {
+            // Ignore errors during cleanup
+          });
+        }).catch(() => {
+          // Ignore errors during cleanup
+        });
+      }
+    };
+    // Empty dependency array - only run on unmount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Attach camera stream to video element when stream is available
+  useEffect(() => {
+    if (cameraStream && videoRef.current) {
+      const video = videoRef.current;
+      // Only attach if not already attached or if srcObject is null
+      if (!video.srcObject || video.srcObject !== cameraStream) {
+        console.log("Attaching stream to video element");
+        video.srcObject = cameraStream;
+        
+        video.play().catch((err) => {
+          console.error("Error playing video in useEffect:", err);
+        });
+      }
+    }
+  }, [cameraStream]);
+
+  // Pause/resume camera when tab becomes hidden/visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && isLiveInferenceRunning) {
+        // Pause frame capture when tab is hidden
+        if (captureIntervalRef.current) {
+          clearInterval(captureIntervalRef.current);
+          captureIntervalRef.current = null;
+        }
+      } else if (!document.hidden && isLiveInferenceRunning && liveInferenceId) {
+        // Resume frame capture when tab becomes visible
+        startFrameCaptureLoop(liveInferenceId);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLiveInferenceRunning, liveInferenceId]);
+
   // Get status badge for inference job
   const getStatusBadgeForJob = (status: string) => {
     switch (status) {
@@ -1258,7 +2012,7 @@ const PredictionPage = () => {
         {/* New Inference Tab */}
         <TabsContent value="new" className="space-y-6">
           {/* Inference mode toggle */}
-          {inferenceStatus === "idle" && selectedProjectId && (
+          {inferenceStatus === "idle" && selectedProjectId && !liveCameraMode && (
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="space-y-1">
                 <h3 className="text-sm font-medium">Inference mode</h3>
@@ -1289,8 +2043,188 @@ const PredictionPage = () => {
             </div>
           )}
 
+          {/* Live Camera View - Only show when liveCameraMode is active */}
+          {liveCameraMode && (
+            <Card className="col-span-2">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Live Camera Inference</CardTitle>
+                    <CardDescription>
+                      Real-time defect detection on camera feed
+                      {fps > 0 && <span className="ml-2">• {fps} FPS</span>}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isLiveInferenceRunning && (
+                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        Running
+                      </Badge>
+                    )}
+                    {isProcessingFrame && (
+                      <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                        Processing...
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Camera Preview and Annotated Frame */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Original Camera Feed */}
+                  <div className="space-y-2">
+                    <Label>Camera Feed</Label>
+                    <div className="relative aspect-video bg-black rounded-md overflow-hidden">
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-contain"
+                        onLoadedMetadata={() => {
+                          console.log("Video loadedmetadata event fired", {
+                            videoWidth: videoRef.current?.videoWidth,
+                            videoHeight: videoRef.current?.videoHeight,
+                            readyState: videoRef.current?.readyState
+                          });
+                        }}
+                        onPlaying={() => {
+                          console.log("Video playing event fired", {
+                            videoWidth: videoRef.current?.videoWidth,
+                            videoHeight: videoRef.current?.videoHeight,
+                            readyState: videoRef.current?.readyState
+                          });
+                        }}
+                        onCanPlay={() => {
+                          console.log("Video canplay event fired", {
+                            videoWidth: videoRef.current?.videoWidth,
+                            videoHeight: videoRef.current?.videoHeight,
+                            readyState: videoRef.current?.readyState
+                          });
+                        }}
+                        onError={(e) => {
+                          console.error("Video element error:", e);
+                        }}
+                      />
+                      {cameraPermission === 'requesting' && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                          <Loader2 className="h-8 w-8 animate-spin text-white" />
+                        </div>
+                      )}
+                      {cameraPermission === 'denied' && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-center p-4">
+                          <div>
+                            <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">Camera access denied</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Annotated Frame Display */}
+                  <div className="space-y-2">
+                    <Label>Annotated Output</Label>
+                    <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
+                      <canvas
+                        ref={annotatedCanvasRef}
+                        className="w-full h-full object-contain"
+                        style={{ 
+                          display: annotatedFrame ? 'block' : 'none',
+                          maxWidth: '100%',
+                          maxHeight: '100%'
+                        }}
+                      />
+                      {!annotatedFrame && (
+                        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                          {isLiveInferenceRunning ? (
+                            <div className="text-center">
+                              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+                              <p className="text-sm">Waiting for first frame...</p>
+                            </div>
+                          ) : (
+                            <div className="text-center">
+                              <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                              <p className="text-sm">Start inference to see results</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {currentDetections > 0 && (
+                        <Badge
+                          variant="outline"
+                          className="absolute top-2 right-2 bg-red-50 text-red-700 border-red-200"
+                        >
+                          {currentDetections} detection{currentDetections !== 1 ? 's' : ''}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Detection Statistics */}
+                {isLiveInferenceRunning && (
+                  <div className="grid gap-4 md:grid-cols-3 pt-2 border-t">
+                    <div>
+                      <div className="text-2xl font-bold">{currentDetections}</div>
+                      <div className="text-sm text-muted-foreground">Current Detections</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold">{fps}</div>
+                      <div className="text-sm text-muted-foreground">FPS</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold">
+                        {isProcessingFrame ? (
+                          <Loader2 className="h-6 w-6 animate-spin inline" />
+                        ) : (
+                          '✓'
+                        )}
+                      </div>
+                      <div className="text-sm text-muted-foreground">Status</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Control Buttons */}
+                <div className="flex items-center gap-2 pt-2 border-t">
+                  {!isLiveInferenceRunning ? (
+                    <Button
+                      onClick={handleStartLiveInference}
+                      disabled={!selectedModelId || startingInference || cameraPermission === 'denied'}
+                      className="flex-1"
+                    >
+                      {startingInference ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Starting...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="mr-2 h-4 w-4" />
+                          Start Live Inference
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleStopLiveInference}
+                      variant="destructive"
+                      className="flex-1"
+                    >
+                      <XCircle className="mr-2 h-4 w-4" />
+                      Stop Inference
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Configuration Section */}
-          {inferenceStatus === "idle" && selectedProjectId && (
+          {inferenceStatus === "idle" && selectedProjectId && !liveCameraMode && (
             <div className="grid gap-6 md:grid-cols-2">
               {/* Left: dataset selector in dataset mode, custom upload in custom mode */}
               {inferenceMode === "dataset" ? (
@@ -1444,17 +2378,22 @@ const PredictionPage = () => {
                       </Button>
                       <Button
                         type="button"
-                        variant="outline"
+                        variant={liveCameraMode ? "default" : "outline"}
                         className="flex items-center gap-2"
                         onClick={() => {
-                          toast({
-                            title: "Live camera",
-                            description: "Live camera input will be supported in a future update.",
-                          });
+                          if (liveCameraMode) {
+                            // Exit live camera mode
+                            handleStopLiveInference();
+                            setLiveCameraMode(false);
+                          } else {
+                            // Enter live camera mode
+                            setLiveCameraMode(true);
+                            setInferenceMode("custom"); // Ensure we're in custom mode
+                          }
                         }}
                       >
                         <Camera className="h-4 w-4" />
-                        Live camera
+                        {liveCameraMode ? "Exit Live Camera" : "Live camera"}
                       </Button>
                     </div>
 
@@ -1541,7 +2480,7 @@ const PredictionPage = () => {
           )}
 
       {/* Confidence Threshold & Start Button */}
-      {inferenceStatus === "idle" && selectedProjectId && (
+      {inferenceStatus === "idle" && selectedProjectId && !liveCameraMode && (
         <Card>
           <CardHeader>
             <CardTitle>Inference Settings</CardTitle>
@@ -2281,6 +3220,9 @@ const PredictionPage = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Hidden canvas for frame capture */}
+      <canvas ref={canvasRef} className="hidden" />
     </div>
   );
 };
