@@ -208,7 +208,7 @@ interface InferenceJob {
 }
 
 interface LiveFrameResponse {
-  annotatedImage: string; // base64 data URL
+  annotatedImage?: string; // base64 data URL (optional when returnAnnotatedImage: false)
   detections: Array<{
     class: string;
     confidence: number;
@@ -1017,7 +1017,7 @@ const PredictionPage = () => {
       const headers = await getAuthHeaders();
       const url = apiUrl(`/inference/live/${encodeURIComponent(currentInferenceId)}/frame`);
       
-      console.log("Sending frame to backend:", {
+      console.log("Sending frame to backend (overlay mode):", {
         url,
         frameSize: frameBase64.length,
         inferenceId: currentInferenceId,
@@ -1033,6 +1033,7 @@ const PredictionPage = () => {
         body: JSON.stringify({
           image: frameBase64,
           confidenceThreshold: confidenceThreshold,
+          returnAnnotatedImage: false, // use overlay mode
         }),
       });
 
@@ -1044,56 +1045,62 @@ const PredictionPage = () => {
       }
 
       const data: LiveFrameResponse = await res.json();
-      console.log("Frame processed successfully:", {
+      console.log("Frame processed successfully (overlay mode):", {
         totalDetections: data.totalDetections,
-        hasAnnotatedImage: !!data.annotatedImage,
-        imageLength: data.annotatedImage?.length || 0,
+        detectionsCount: data.detections?.length ?? 0,
         timestamp: new Date().toISOString()
       });
-      
-      // Update annotated frame and detections
-      // Draw directly to canvas for better performance and smooth updates
-      if (annotatedCanvasRef.current && data.annotatedImage) {
-        const canvas = annotatedCanvasRef.current;
+
+      // Draw detections on overlay canvas
+      const canvas = annotatedCanvasRef.current;
+      const video = videoRef.current;
+      if (canvas && video) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          const img = new Image();
-          img.onload = () => {
-            // Set canvas size to match image, but maintain aspect ratio for display
-            const maxWidth = 1280;
-            const maxHeight = 720;
-            const aspectRatio = img.width / img.height;
-            
-            let canvasWidth = img.width;
-            let canvasHeight = img.height;
-            
-            if (canvasWidth > maxWidth) {
-              canvasWidth = maxWidth;
-              canvasHeight = canvasWidth / aspectRatio;
-            }
-            if (canvasHeight > maxHeight) {
-              canvasHeight = maxHeight;
-              canvasWidth = canvasHeight * aspectRatio;
-            }
-            
-            canvas.width = canvasWidth;
-            canvas.height = canvasHeight;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
-          };
-          img.onerror = (err) => {
-            console.error("Error loading annotated image:", err);
-          };
-          img.src = data.annotatedImage;
+          // Sync canvas size with video
+          if (video.videoWidth > 0 && video.videoHeight > 0) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+          }
+
+          // Clear previous annotations
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          const detections = data.detections || [];
+          detections.forEach((det) => {
+            const [x1, y1, x2, y2] = det.bbox;
+            const width = x2 - x1;
+            const height = y2 - y1;
+            const label = `${det.class} ${(det.confidence * 100).toFixed(0)}%`;
+
+            // Draw bounding box
+            ctx.strokeStyle = "#00FF00";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x1, y1, width, height);
+
+            // Draw label background
+            ctx.font = "bold 14px Arial";
+            const textMetrics = ctx.measureText(label);
+            const labelWidth = textMetrics.width + 10;
+            const labelHeight = 20;
+            const labelY = Math.max(0, y1 - labelHeight);
+
+            ctx.fillStyle = "rgba(0,255,0,0.7)";
+            ctx.fillRect(x1, labelY, labelWidth, labelHeight);
+
+            // Draw label text
+            ctx.fillStyle = "#000000";
+            ctx.fillText(label, x1 + 5, labelY + labelHeight - 6);
+          });
         }
       }
       
-      // Also update state for compatibility
+      // Update state
       setFrameKey(prev => prev + 1);
-      setAnnotatedFrame(data.annotatedImage);
-      setCurrentDetections(data.totalDetections);
+      setAnnotatedFrame(null); // no longer used for live overlay
+      setCurrentDetections(data.totalDetections ?? (data.detections?.length ?? 0));
       
-      // Optional: Update FPS calculation
+      // Update FPS calculation
       const now = Date.now();
       const elapsed = now - lastFrameTimeRef.current;
       if (elapsed > 0) {
@@ -2303,96 +2310,66 @@ const PredictionPage = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Camera Preview and Annotated Frame */}
-                <div className="grid gap-4 md:grid-cols-2">
-                  {/* Original Camera Feed */}
-                  <div className="space-y-2">
-                    <Label>Camera Feed</Label>
-                    <div className="relative aspect-video bg-black rounded-md overflow-hidden">
-                      <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-contain"
-                        onLoadedMetadata={() => {
-                          console.log("Video loadedmetadata event fired", {
-                            videoWidth: videoRef.current?.videoWidth,
-                            videoHeight: videoRef.current?.videoHeight,
-                            readyState: videoRef.current?.readyState
-                          });
-                        }}
-                        onPlaying={() => {
-                          console.log("Video playing event fired", {
-                            videoWidth: videoRef.current?.videoWidth,
-                            videoHeight: videoRef.current?.videoHeight,
-                            readyState: videoRef.current?.readyState
-                          });
-                        }}
-                        onCanPlay={() => {
-                          console.log("Video canplay event fired", {
-                            videoWidth: videoRef.current?.videoWidth,
-                            videoHeight: videoRef.current?.videoHeight,
-                            readyState: videoRef.current?.readyState
-                          });
-                        }}
-                        onError={(e) => {
-                          console.error("Video element error:", e);
-                        }}
-                      />
-                      {cameraPermission === 'requesting' && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                          <Loader2 className="h-8 w-8 animate-spin text-white" />
+                {/* Camera feed with overlay canvas for detections */}
+                <div className="space-y-2">
+                  <Label>Live Camera with Annotations</Label>
+                  <div className="relative aspect-video bg-black rounded-md overflow-hidden">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-contain"
+                      onLoadedMetadata={() => {
+                        console.log("Video loadedmetadata event fired", {
+                          videoWidth: videoRef.current?.videoWidth,
+                          videoHeight: videoRef.current?.videoHeight,
+                          readyState: videoRef.current?.readyState
+                        });
+                      }}
+                      onPlaying={() => {
+                        console.log("Video playing event fired", {
+                          videoWidth: videoRef.current?.videoWidth,
+                          videoHeight: videoRef.current?.videoHeight,
+                          readyState: videoRef.current?.readyState
+                        });
+                      }}
+                      onCanPlay={() => {
+                        console.log("Video canplay event fired", {
+                          videoWidth: videoRef.current?.videoWidth,
+                          videoHeight: videoRef.current?.videoHeight,
+                          readyState: videoRef.current?.readyState
+                        });
+                      }}
+                      onError={(e) => {
+                        console.error("Video element error:", e);
+                      }}
+                    />
+                    <canvas
+                      ref={annotatedCanvasRef}
+                      className="absolute inset-0 w-full h-full pointer-events-none"
+                    />
+                    {cameraPermission === 'requesting' && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                        <Loader2 className="h-8 w-8 animate-spin text-white" />
+                      </div>
+                    )}
+                    {cameraPermission === 'denied' && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-center p-4">
+                        <div>
+                          <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">Camera access denied</p>
                         </div>
-                      )}
-                      {cameraPermission === 'denied' && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-center p-4">
-                          <div>
-                            <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">Camera access denied</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Annotated Frame Display */}
-                  <div className="space-y-2">
-                    <Label>Annotated Output</Label>
-                    <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
-                      <canvas
-                        ref={annotatedCanvasRef}
-                        className="w-full h-full object-contain"
-                        style={{ 
-                          display: annotatedFrame ? 'block' : 'none',
-                          maxWidth: '100%',
-                          maxHeight: '100%'
-                        }}
-                      />
-                      {!annotatedFrame && (
-                        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                          {isLiveInferenceRunning ? (
-                            <div className="text-center">
-                              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                              <p className="text-sm">Waiting for first frame...</p>
-                            </div>
-                          ) : (
-                            <div className="text-center">
-                              <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                              <p className="text-sm">Start inference to see results</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {currentDetections > 0 && (
-                        <Badge
-                          variant="outline"
-                          className="absolute top-2 right-2 bg-red-50 text-red-700 border-red-200"
-                        >
-                          {currentDetections} detection{currentDetections !== 1 ? 's' : ''}
-                        </Badge>
-                      )}
-                    </div>
+                      </div>
+                    )}
+                    {currentDetections > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="absolute top-2 right-2 bg-red-50 text-red-700 border-red-200"
+                      >
+                        {currentDetections} detection{currentDetections !== 1 ? 's' : ''}
+                      </Badge>
+                    )}
                   </div>
                 </div>
 
