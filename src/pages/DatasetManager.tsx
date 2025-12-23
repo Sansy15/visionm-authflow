@@ -2145,13 +2145,28 @@ const DatasetManager = () => {
                             {selectedVersionDatasetId === v.datasetId && <span className="text-xs text-primary"> (selected)</span>}
                           </div>
                           <div className="flex items-center gap-3">
-                            <button
-                              className="text-xs text-destructive hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
-                              onClick={() => handleDeleteVersionClick(v.datasetId)}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectVersion(v.datasetId);
+                              }}
+                            >
+                              View
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-destructive/40 text-destructive hover:bg-destructive/5"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteVersionClick(v.datasetId);
+                              }}
                               disabled={(deletingVersion || loadingDependencies) && versionToDelete === v.datasetId}
                             >
                               Delete
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       ))}

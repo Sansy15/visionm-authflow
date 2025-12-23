@@ -16,7 +16,14 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
-import { Loader2, ArrowLeft } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Loader2, ArrowLeft, ZoomIn, ZoomOut, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -54,7 +61,83 @@ interface HistoryInferenceResults {
     url: string;
     fileType?: string;
   }>;
+  // Optional metadata block from backend (contains video detection info)
+  metadata?: {
+    videos?: Array<{
+      filePath?: string;
+      detections?: Array<{
+        className?: string;
+        confidence?: number;
+        bbox?: number[];
+      }>;
+      detectionCount?: number;
+    }>;
+    images?: Array<{
+      filePath?: string;
+      detections?: Array<{
+        className?: string;
+        confidence?: number;
+        bbox?: number[];
+      }>;
+    }>;
+    files?: Array<{
+      filePath?: string;
+      type?: string;
+    }>;
+  };
 }
+
+// VideoPlayer component with error handling and loading state
+const VideoPlayer = ({ 
+  video, 
+  detectionCount 
+}: { 
+  video: { filename: string; url: string; fileType?: string }; 
+  detectionCount?: number;
+}) => {
+  const [videoError, setVideoError] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(true);
+
+  return (
+    <div className="space-y-2">
+      <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
+        {videoLoading && !videoError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {videoError ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground text-sm p-4 text-center">
+            Failed to load video
+          </div>
+        ) : (
+          <video
+            controls
+            className="w-full h-full object-contain"
+            onLoadedData={() => setVideoLoading(false)}
+            onError={() => {
+              setVideoError(true);
+              setVideoLoading(false);
+            }}
+          >
+            <source src={video.url} type="video/mp4" />
+            <source src={video.url} type="video/webm" />
+            <source src={video.url} type="video/avi" />
+            Your browser does not support the video tag.
+          </video>
+        )}
+      </div>
+      <div className="text-xs text-muted-foreground truncate">
+        {video.filename}
+      </div>
+      {detectionCount !== undefined && detectionCount > 0 && (
+        <div className="text-xs text-muted-foreground">
+          {detectionCount} detection{detectionCount !== 1 ? "s" : ""}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const PredictionHistoryDetailsPage = () => {
   const { inferenceId } = useParams<{ inferenceId: string }>();
@@ -65,6 +148,13 @@ const PredictionHistoryDetailsPage = () => {
   const [results, setResults] = useState<HistoryInferenceResults | null>(null);
   const [imageFilter, setImageFilter] = useState<'all' | 'good' | 'defect'>('all');
   const [hasTags, setHasTags] = useState(false);
+
+  // Annotated image viewer state
+  type ImageItem = { filename: string; url: string; tag?: string };
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [imageViewerImages, setImageViewerImages] = useState<ImageItem[]>([]);
+  const [imageViewerIndex, setImageViewerIndex] = useState(0);
+  const [imageZoom, setImageZoom] = useState(1);
 
   // Helper function to normalize annotated images from either structure
   const normalizeAnnotatedImages = (
@@ -119,11 +209,20 @@ const PredictionHistoryDetailsPage = () => {
     const apiBase = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
 
     return videos.map((vid) => {
+      // Ensure filename is always present
+      const filename = vid.filename || "";
+      
+      // Construct URL: videos are always in annotated/ folder, no folder query param needed
       const raw = vid.url || "";
       const basePath = raw.startsWith("/api/") ? raw.slice(4) : raw;
-      const fullUrl = apiBase ? `${apiBase}/${basePath.replace(/^\/+/, "")}` : raw;
+      
+      // Remove any folder query parameters (videos don't use folder param)
+      const cleanPath = basePath.split('?')[0];
+      
+      const fullUrl = apiBase ? `${apiBase}/${cleanPath.replace(/^\/+/, "")}` : cleanPath;
+      
       return {
-        filename: vid.filename || "",
+        filename,
         url: fullUrl,
         fileType: "video",
       };
@@ -188,6 +287,7 @@ const PredictionHistoryDetailsPage = () => {
           defect: 0,
           hasTags: false,
         },
+        metadata: data.metadata, // Preserve metadata for video detection info
       };
 
       setResults(normalized);
@@ -232,7 +332,7 @@ const PredictionHistoryDetailsPage = () => {
         className="px-0"
       >
         <ArrowLeft className="mr-2 h-4 w-4" />
-        Back to Prediction History
+        Prediction History
       </Button>
 
       {loading ? (
@@ -349,8 +449,6 @@ const PredictionHistoryDetailsPage = () => {
 
           {/* Annotated Images with Filter Tabs */}
           {(() => {
-            type ImageItem = { filename: string; url: string; tag?: string };
-            
             // Get images array (handle both old and new structures)
             const imagesArray: ImageItem[] = Array.isArray(results.annotatedImages)
               ? results.annotatedImages
@@ -368,6 +466,13 @@ const PredictionHistoryDetailsPage = () => {
             if (showFilters && imageFilter !== 'all') {
               imagesToDisplay = imagesArray.filter((img) => img.tag === imageFilter);
             }
+
+            const openImageViewerAt = (index: number, list: ImageItem[]) => {
+              setImageViewerImages(list);
+              setImageViewerIndex(index);
+              setImageZoom(1);
+              setImageViewerOpen(true);
+            };
             
             return (
               <Card>
@@ -400,7 +505,8 @@ const PredictionHistoryDetailsPage = () => {
                           {imagesArray.map((img, idx) => (
                             <div
                               key={img.filename || img.url || `history-image-${idx}`}
-                              className="space-y-2"
+                              className="space-y-2 cursor-zoom-in"
+                              onClick={() => openImageViewerAt(idx, imagesArray)}
                             >
                               <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
                                 <img
@@ -434,7 +540,13 @@ const PredictionHistoryDetailsPage = () => {
                           {imagesArray.filter((img) => img.tag === 'good').map((img, idx) => (
                             <div
                               key={img.filename || img.url || `history-image-${idx}`}
-                              className="space-y-2"
+                              className="space-y-2 cursor-zoom-in"
+                              onClick={() =>
+                                openImageViewerAt(
+                                  idx,
+                                  imagesArray.filter((img) => img.tag === 'good'),
+                                )
+                              }
                             >
                               <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
                                 <img
@@ -462,7 +574,13 @@ const PredictionHistoryDetailsPage = () => {
                           {imagesArray.filter((img) => img.tag === 'defect').map((img, idx) => (
                             <div
                               key={img.filename || img.url || `history-image-${idx}`}
-                              className="space-y-2"
+                              className="space-y-2 cursor-zoom-in"
+                              onClick={() =>
+                                openImageViewerAt(
+                                  idx,
+                                  imagesArray.filter((img) => img.tag === 'defect'),
+                                )
+                              }
                             >
                               <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
                                 <img
@@ -513,6 +631,91 @@ const PredictionHistoryDetailsPage = () => {
             );
           })()}
 
+          {/* Annotated Image Viewer Dialog */}
+          <Dialog
+            open={imageViewerOpen}
+            onOpenChange={(open) => {
+              setImageViewerOpen(open);
+              if (!open) {
+                setImageZoom(1);
+              }
+            }}
+          >
+            <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle>
+                  {imageViewerImages[imageViewerIndex]?.filename || "Annotated image"}
+                </DialogTitle>
+                <DialogDescription>
+                  {imageViewerImages.length > 0 &&
+                    `${imageViewerIndex + 1} of ${imageViewerImages.length}`}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-auto flex items-center justify-center bg-muted rounded-md">
+                {imageViewerImages[imageViewerIndex] && (
+                  <img
+                    src={imageViewerImages[imageViewerIndex].url}
+                    alt={imageViewerImages[imageViewerIndex].filename}
+                    className="max-h-[80vh] object-contain transition-transform"
+                    style={{ transform: `scale(${imageZoom})`, transformOrigin: "center center" }}
+                  />
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-4 pt-4">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setImageZoom((z) => Math.min(z + 0.25, 4))}
+                    aria-label="Zoom in"
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setImageZoom((z) => Math.max(z - 0.25, 0.5))}
+                    aria-label="Zoom out"
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {Math.round(imageZoom * 100)}%
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setImageViewerIndex((idx) => Math.max(idx - 1, 0))
+                    }
+                    disabled={imageViewerIndex <= 0}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setImageViewerIndex((idx) =>
+                        Math.min(idx + 1, imageViewerImages.length - 1),
+                      )
+                    }
+                    disabled={imageViewerIndex >= imageViewerImages.length - 1}
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           {/* Videos (if any) */}
           {results.videos && results.videos.length > 0 && (
             <Card>
@@ -525,23 +728,21 @@ const PredictionHistoryDetailsPage = () => {
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {results.videos.map((video, idx) => (
-                    <div
-                      key={video.filename || video.url || `history-video-${idx}`}
-                      className="space-y-2"
-                    >
-                      <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
-                        <video
-                          src={video.url}
-                          controls
-                          className="w-full h-full object-contain"
-                        />
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        {video.filename}
-                      </div>
-                    </div>
-                  ))}
+                  {results.videos.map((video, idx) => {
+                    // Find detection count from metadata
+                    const videoMetadata = results.metadata?.videos?.find(
+                      (v) => v.filePath?.includes(video.filename) || v.filePath === video.filename
+                    );
+                    const detectionCount = videoMetadata?.detectionCount ?? videoMetadata?.detections?.length ?? 0;
+                    
+                    return (
+                      <VideoPlayer
+                        key={video.filename || video.url || `history-video-${idx}`}
+                        video={video}
+                        detectionCount={detectionCount}
+                      />
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>

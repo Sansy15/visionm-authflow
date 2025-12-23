@@ -97,7 +97,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
     } else {
       setProjects([]);
     }
-  }, [companyId]);
+  }, [companyId, location.pathname]);
 
   const openProject = (id: string) => navigate(`/dataset/${id}`);
 

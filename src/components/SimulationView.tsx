@@ -781,6 +781,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
         if (["queued", "running"].includes(status)) {
           setIsSimulating(true);
           startPollingJob(savedState.jobId);
+          startLogsPolling(savedState.jobId);
           console.log("[SimulationView] Resumed polling for active training");
         } else if (status === "completed") {
           // Completed: show results from snapshot, no polling, no clearing

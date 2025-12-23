@@ -13,3 +13,5 @@ Inference,/inference/{inferenceId}/cancel,POST,PredictionPage.tsx (cancelInferen
 Inference,/inference/{inferenceId},DELETE,PredictionPage.tsx (deleteInference),When user confirms deletion of inference results,Path: inferenceId,"Permanently deletes inference job and results. Error 400 if job is running/queued."
 
 
+
+

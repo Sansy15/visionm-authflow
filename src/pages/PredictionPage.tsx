@@ -1,5 +1,5 @@
 // src/pages/PredictionPage.tsx
-import { useEffect, useState, useRef, useCallback } from "react"; 
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useProfile } from "@/hooks/useProfile";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,7 +30,22 @@ import {
   TabsContent,
 } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { BrainCircuit, Play, Loader2, CheckCircle2, XCircle, Clock, Trash2, Image as ImageIcon, Video, Camera } from "lucide-react";
+import {
+  BrainCircuit,
+  Play,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Trash2,
+  Image as ImageIcon,
+  Video,
+  Camera,
+  ZoomIn,
+  ZoomOut,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -42,6 +57,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiUrl = (path: string) => {
@@ -199,6 +221,58 @@ interface LiveFrameResponse {
 const STORAGE_PREFIX = "prediction_";
 type InferenceMode = "dataset" | "custom";
 
+// VideoPlayer component with error handling and loading state
+const VideoPlayer = ({ 
+  video, 
+  detectionCount 
+}: { 
+  video: { filename: string; url: string; fileType?: string }; 
+  detectionCount?: number;
+}) => {
+  const [videoError, setVideoError] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(true);
+
+  return (
+    <div className="space-y-2">
+      <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
+        {videoLoading && !videoError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {videoError ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground text-sm p-4 text-center">
+            Failed to load video
+          </div>
+        ) : (
+          <video
+            controls
+            className="w-full h-full object-contain"
+            onLoadedData={() => setVideoLoading(false)}
+            onError={() => {
+              setVideoError(true);
+              setVideoLoading(false);
+            }}
+          >
+            <source src={video.url} type="video/mp4" />
+            <source src={video.url} type="video/webm" />
+            <source src={video.url} type="video/avi" />
+            Your browser does not support the video tag.
+          </video>
+        )}
+      </div>
+      <div className="text-xs text-muted-foreground truncate">
+        {video.filename}
+      </div>
+      {detectionCount !== undefined && detectionCount > 0 && (
+        <div className="text-xs text-muted-foreground">
+          {detectionCount} detection{detectionCount !== 1 ? "s" : ""}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PredictionPage = () => {
   const { profile, company, sessionReady } = useProfile();
   const { toast } = useToast();
@@ -241,6 +315,18 @@ const PredictionPage = () => {
   
   // Image filter state for tagged inference results
   const [imageFilter, setImageFilter] = useState<'all' | 'good' | 'defect'>('all');
+
+  // Annotated image viewer state
+  type AnnotatedImageItem = {
+    filename: string;
+    url: string;
+    tag?: string;
+    detections?: any[];
+  };
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [imageViewerImages, setImageViewerImages] = useState<AnnotatedImageItem[]>([]);
+  const [imageViewerIndex, setImageViewerIndex] = useState(0);
+  const [imageZoom, setImageZoom] = useState(1);
 
   // Inference mode: dataset-based vs custom upload
   const [inferenceMode, setInferenceMode] = useState<InferenceMode>("dataset");
@@ -1661,17 +1747,21 @@ const PredictionPage = () => {
     if (!videos || !Array.isArray(videos)) return [];
 
     return videos.map((vid) => {
-      const rawPath =
-        vid.url && typeof vid.url === "string" && vid.url.startsWith("/api/")
-          ? vid.url.slice(4) // remove leading "/api"
-          : vid.url ||
-            `/inference/${encodeURIComponent(inferenceId)}/image/${encodeURIComponent(
-              vid.filename,
-            )}`;
+      // Ensure filename is always present
+      const filename = vid.filename || "";
+      
+      // Construct URL: videos are always in annotated/ folder, no folder query param needed
+      const rawPath = vid.url && typeof vid.url === "string" && vid.url.startsWith("/api/")
+        ? vid.url.slice(4) // remove leading "/api"
+        : vid.url || `/inference/${encodeURIComponent(inferenceId)}/image/${encodeURIComponent(filename)}`;
+
+      // Remove any folder query parameters (videos don't use folder param)
+      const cleanPath = rawPath.split('?')[0];
 
       return {
-        ...vid,
-        url: apiUrl(rawPath),
+        filename,
+        url: apiUrl(cleanPath),
+        fileType: "video",
       };
     });
   };
@@ -1726,6 +1816,7 @@ const PredictionPage = () => {
           defect: 0,
           hasTags: false,
         },
+        metadata: data.metadata, // Preserve metadata for video detection info
       };
 
       setResults(normalizedData);
@@ -1794,17 +1885,17 @@ const PredictionPage = () => {
       if (inferenceMode === "dataset") {
         // Existing JSON-based dataset inference
         res = await fetch(url, {
-          method: "POST",
-          headers: {
-            ...headers,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            modelId: selectedModelId,
-            datasetId: selectedDatasetId,
-            confidenceThreshold: confidenceThreshold,
-          }),
-        });
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          modelId: selectedModelId,
+          datasetId: selectedDatasetId,
+          confidenceThreshold: confidenceThreshold,
+        }),
+      });
       } else {
         // New custom upload inference using multipart/form-data
         const formData = new FormData();
@@ -2366,56 +2457,56 @@ const PredictionPage = () => {
 
           {/* Configuration Section */}
           {inferenceStatus === "idle" && selectedProjectId && !liveCameraMode && (
-            <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-6 md:grid-cols-2">
               {/* Left: dataset selector in dataset mode, custom upload in custom mode */}
               {inferenceMode === "dataset" ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Select Dataset</CardTitle>
+          <Card>
+            <CardHeader>
+              <CardTitle>Select Dataset</CardTitle>
                     <CardDescription>Choose a dataset with test images for inference</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {loadingDatasets ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : datasets.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-4">
-                        No ready datasets available for this project. Datasets must have test images.
-                      </p>
-                    ) : (
-                      <div className="space-y-2 max-h-60 overflow-auto">
-                        {datasets.map((dataset, idx) => {
-                          const datasetId = dataset.datasetId || dataset._id || dataset.id || "";
-                          const isSelected = datasetId === selectedDatasetId;
-                          const datasetKey = datasetId || `dataset-${idx}`;
-                          return (
-                            <button
-                              key={datasetKey}
-                              onClick={() => handleDatasetSelect(datasetId)}
-                              className={cn(
-                                "w-full text-left p-3 rounded-md border transition-colors",
-                                isSelected
-                                  ? "border-primary bg-primary/5"
-                                  : "border-border hover:bg-muted"
-                              )}
-                            >
-                              <div className="font-medium">{dataset.version || "Unversioned"}</div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Test: {dataset.testCount || 0} • Total: {dataset.totalImages || 0}
-                              </div>
-                              {dataset.createdAt && (
-                                <div className="text-xs text-muted-foreground">
-                                  {new Date(dataset.createdAt).toLocaleDateString()}
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {loadingDatasets ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : datasets.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No ready datasets available for this project. Datasets must have test images.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-60 overflow-auto">
+                  {datasets.map((dataset, idx) => {
+                    const datasetId = dataset.datasetId || dataset._id || dataset.id || "";
+                    const isSelected = datasetId === selectedDatasetId;
+                    const datasetKey = datasetId || `dataset-${idx}`;
+                    return (
+                      <button
+                        key={datasetKey}
+                        onClick={() => handleDatasetSelect(datasetId)}
+                        className={cn(
+                          "w-full text-left p-3 rounded-md border transition-colors",
+                          isSelected
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:bg-muted"
+                        )}
+                      >
+                        <div className="font-medium">{dataset.version || "Unversioned"}</div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Test: {dataset.testCount || 0} • Total: {dataset.totalImages || 0}
+                        </div>
+                        {dataset.createdAt && (
+                          <div className="text-xs text-muted-foreground">
+                            {new Date(dataset.createdAt).toLocaleDateString()}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
               ) : (
                 <Card>
                   <CardHeader>
@@ -2585,62 +2676,62 @@ const PredictionPage = () => {
               )}
 
               {/* Right: model selection (always visible) */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Select Model</CardTitle>
-                  <CardDescription>Choose a trained model for inference</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {loadingModels ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : models.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-4">
-                      No trained models available.
-                    </p>
-                  ) : (
-                    <div className="space-y-2 max-h-60 overflow-auto">
-                      {models.map((model, idx) => {
-                        const modelId = model.modelId || model._id || "";
-                        const isSelected = modelId === selectedModelId;
-                        const modelKey = modelId || `model-${idx}`;
-                        return (
-                          <button
-                            key={modelKey}
-                            onClick={() => handleModelSelect(modelId)}
-                            className={cn(
-                              "w-full text-left p-3 rounded-md border transition-colors",
-                              isSelected
-                                ? "border-primary bg-primary/5"
-                                : "border-border hover:bg-muted"
+          <Card>
+            <CardHeader>
+              <CardTitle>Select Model</CardTitle>
+              <CardDescription>Choose a trained model for inference</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {loadingModels ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : models.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No trained models available.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-60 overflow-auto">
+                  {models.map((model, idx) => {
+                    const modelId = model.modelId || model._id || "";
+                    const isSelected = modelId === selectedModelId;
+                    const modelKey = modelId || `model-${idx}`;
+                    return (
+                      <button
+                        key={modelKey}
+                        onClick={() => handleModelSelect(modelId)}
+                        className={cn(
+                          "w-full text-left p-3 rounded-md border transition-colors",
+                          isSelected
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:bg-muted"
+                        )}
+                      >
+                        <div className="font-medium">
+                          {model.name || model.modelVersion || model.modelId || "Unnamed Model"}
+                        </div>
+                        {model.metrics && (
+                          <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                            {model.metrics.mAP50 !== undefined && (
+                              <div>mAP50: {model.metrics.mAP50.toFixed(3)}</div>
                             )}
-                          >
-                            <div className="font-medium">
-                              {model.name || model.modelVersion || model.modelId || "Unnamed Model"}
-                            </div>
-                            {model.metrics && (
-                              <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
-                                {model.metrics.mAP50 !== undefined && (
-                                  <div>mAP50: {model.metrics.mAP50.toFixed(3)}</div>
-                                )}
-                                {model.metrics.precision !== undefined && (
-                                  <div>Precision: {model.metrics.precision.toFixed(3)}</div>
-                                )}
-                                {model.metrics.recall !== undefined && (
-                                  <div>Recall: {model.metrics.recall.toFixed(3)}</div>
-                                )}
-                              </div>
+                            {model.metrics.precision !== undefined && (
+                              <div>Precision: {model.metrics.precision.toFixed(3)}</div>
                             )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
+                            {model.metrics.recall !== undefined && (
+                              <div>Recall: {model.metrics.recall.toFixed(3)}</div>
+                            )}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Confidence Threshold & Start Button */}
       {inferenceStatus === "idle" && selectedProjectId && !liveCameraMode && (
@@ -2684,11 +2775,11 @@ const PredictionPage = () => {
                   ? !!selectedProjectId && !!selectedDatasetId && !!selectedModelId
                   : !!selectedProjectId && !!selectedModelId && testFiles.length > 0;
               return (
-                <Button
-                  onClick={handleStartInference}
+            <Button
+              onClick={handleStartInference}
                   disabled={!canStart || startingInference}
-                  className="w-full"
-                >
+              className="w-full"
+            >
               {startingInference ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -2700,7 +2791,7 @@ const PredictionPage = () => {
                   Start Prediction
                 </>
               )}
-                </Button>
+            </Button>
               );
             })()}
           </CardContent>
@@ -2922,7 +3013,7 @@ const PredictionPage = () => {
               {/* Annotated Images with Filter Tabs */}
               {(() => {
                 // Get images array (handle both old and new structures)
-                const imagesArray = Array.isArray(results.annotatedImages)
+                const imagesArray: AnnotatedImageItem[] = Array.isArray(results.annotatedImages)
                   ? results.annotatedImages
                   : results.annotatedImages && typeof results.annotatedImages === 'object' && 'all' in results.annotatedImages
                   ? results.annotatedImages.all
@@ -2934,10 +3025,17 @@ const PredictionPage = () => {
                 const showFilters = results.statistics?.hasTags === true;
                 
                 // Get images to display based on filter
-                let imagesToDisplay = imagesArray;
+                let imagesToDisplay: AnnotatedImageItem[] = imagesArray;
                 if (showFilters && imageFilter !== 'all') {
-                  imagesToDisplay = imagesArray.filter((img: any) => img.tag === imageFilter);
+                  imagesToDisplay = imagesArray.filter((img) => img.tag === imageFilter);
                 }
+
+                const openImageViewerAt = (index: number, list: AnnotatedImageItem[]) => {
+                  setImageViewerImages(list);
+                  setImageViewerIndex(index);
+                  setImageZoom(1);
+                  setImageViewerOpen(true);
+                };
                 
                 return (
                 <Card>
@@ -2967,8 +3065,12 @@ const PredictionPage = () => {
                           
                           <TabsContent value="all" className="mt-0">
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                              {imagesArray.map((img: any, idx: number) => (
-                        <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
+                              {imagesArray.map((img, idx) => (
+                        <div
+                          key={img.filename || img.url || `image-${idx}`}
+                          className="space-y-2 cursor-zoom-in"
+                          onClick={() => openImageViewerAt(idx, imagesArray)}
+                        >
                           <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
                             <img
                               src={img.url}
@@ -3004,8 +3106,17 @@ const PredictionPage = () => {
                           </TabsContent>
                           <TabsContent value="good" className="mt-0">
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                              {imagesArray.filter((img: any) => img.tag === 'good').map((img: any, idx: number) => (
-                                <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
+                              {imagesArray.filter((img) => img.tag === 'good').map((img, idx) => (
+                                <div
+                                  key={img.filename || img.url || `image-${idx}`}
+                                  className="space-y-2 cursor-zoom-in"
+                                  onClick={() =>
+                                    openImageViewerAt(
+                                      idx,
+                                      imagesArray.filter((img) => img.tag === 'good'),
+                                    )
+                                  }
+                                >
                                   <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
                                     <img
                                       src={img.url}
@@ -3035,8 +3146,17 @@ const PredictionPage = () => {
                           </TabsContent>
                           <TabsContent value="defect" className="mt-0">
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                              {imagesArray.filter((img: any) => img.tag === 'defect').map((img: any, idx: number) => (
-                                <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
+                              {imagesArray.filter((img) => img.tag === 'defect').map((img, idx) => (
+                                <div
+                                  key={img.filename || img.url || `image-${idx}`}
+                                  className="space-y-2 cursor-zoom-in"
+                                  onClick={() =>
+                                    openImageViewerAt(
+                                      idx,
+                                      imagesArray.filter((img) => img.tag === 'defect'),
+                                    )
+                                  }
+                                >
                                   <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
                                     <img
                                       src={img.url}
@@ -3067,8 +3187,12 @@ const PredictionPage = () => {
                         </Tabs>
                       ) : (
                         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                          {imagesArray.map((img: any, idx: number) => (
-                            <div key={img.filename || img.url || `image-${idx}`} className="space-y-2">
+                          {imagesArray.map((img, idx) => (
+                            <div
+                              key={img.filename || img.url || `image-${idx}`}
+                              className="space-y-2 cursor-zoom-in"
+                              onClick={() => openImageViewerAt(idx, imagesArray)}
+                            >
                               <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
                                 <img
                                   src={img.url}
@@ -3095,6 +3219,94 @@ const PredictionPage = () => {
                 );
               })()}
 
+              {/* Annotated Image Viewer Dialog */}
+              <Dialog
+                open={imageViewerOpen}
+                onOpenChange={(open) => {
+                  setImageViewerOpen(open);
+                  if (!open) {
+                    setImageZoom(1);
+                  }
+                }}
+              >
+                <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {imageViewerImages[imageViewerIndex]?.filename || "Annotated image"}
+                    </DialogTitle>
+                    <DialogDescription>
+                      {imageViewerImages.length > 0 &&
+                        `${imageViewerIndex + 1} of ${imageViewerImages.length}`}
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="flex-1 overflow-auto flex items-center justify-center bg-muted rounded-md">
+                    {imageViewerImages[imageViewerIndex] && (
+                      <img
+                        src={imageViewerImages[imageViewerIndex].url}
+                        alt={imageViewerImages[imageViewerIndex].filename}
+                        className="max-h-[80vh] object-contain transition-transform"
+                        style={{
+                          transform: `scale(${imageZoom})`,
+                          transformOrigin: "center center",
+                        }}
+                      />
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 pt-4">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setImageZoom((z) => Math.min(z + 0.25, 4))}
+                        aria-label="Zoom in"
+                      >
+                        <ZoomIn className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setImageZoom((z) => Math.max(z - 0.25, 0.5))}
+                        aria-label="Zoom out"
+                      >
+                        <ZoomOut className="h-4 w-4" />
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        {Math.round(imageZoom * 100)}%
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setImageViewerIndex((idx) => Math.max(idx - 1, 0))
+                        }
+                        disabled={imageViewerIndex <= 0}
+                      >
+                        <ChevronLeft className="h-4 w-4 mr-1" />
+                        Previous
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setImageViewerIndex((idx) =>
+                            Math.min(idx + 1, imageViewerImages.length - 1),
+                          )
+                        }
+                        disabled={imageViewerIndex >= imageViewerImages.length - 1}
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
               {/* Videos (if any) */}
               {results.videos && results.videos.length > 0 && (
                 <Card>
@@ -3107,23 +3319,21 @@ const PredictionPage = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                      {results.videos.map((video, idx) => (
-                        <div
-                          key={video.filename || video.url || `video-${idx}`}
-                          className="space-y-2"
-                        >
-                          <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
-                            <video
-                              src={video.url}
-                              controls
-                              className="w-full h-full object-contain"
-                            />
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            {video.filename}
-                          </div>
-                        </div>
-                      ))}
+                      {results.videos.map((video, idx) => {
+                        // Find detection count from metadata
+                        const videoMetadata = results.metadata?.videos?.find(
+                          (v) => v.filePath?.includes(video.filename) || v.filePath === video.filename
+                        );
+                        const detectionCount = videoMetadata?.detectionCount ?? videoMetadata?.detections?.length ?? 0;
+                        
+                        return (
+                          <VideoPlayer
+                            key={video.filename || video.url || `video-${idx}`}
+                            video={video}
+                            detectionCount={detectionCount}
+                          />
+                        );
+                      })}
                     </div>
                   </CardContent>
                 </Card>
