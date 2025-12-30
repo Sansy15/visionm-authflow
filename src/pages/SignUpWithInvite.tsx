@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/PasswordInput";
+import { motion } from "framer-motion";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export default function SignUpWithInvite() {
   const [searchParams] = useSearchParams();
@@ -119,12 +121,17 @@ export default function SignUpWithInvite() {
   if (validating) return <div className="min-h-screen flex items-center justify-center bg-background text-foreground">Validating invite...</div>;
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-6">
-      <div className="max-w-md w-full">
+      <motion.div
+        className="max-w-md w-full"
+        variants={fadeInUpVariants}
+        initial="hidden"
+        animate="visible"
+      >
         <h2 className="text-2xl font-bold mb-4 text-foreground">Create account</h2>
 
         {errorMsg && <div className="text-destructive mb-4">{errorMsg}</div>}
 
-      <form onSubmit={handleSignUp} className="space-y-4">
+        <form onSubmit={handleSignUp} className="space-y-4">
         <label>
           <div className="text-sm text-muted-foreground">Email</div>
           <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -135,11 +142,11 @@ export default function SignUpWithInvite() {
           <PasswordInput required value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
 
-        <div>
-          <Button type="submit" disabled={loading}>{loading ? "Creating..." : "Create account"}</Button>
-        </div>
-      </form>
-      </div>
+          <div>
+            <Button type="submit" disabled={loading}>{loading ? "Creating..." : "Create account"}</Button>
+          </div>
+        </form>
+      </motion.div>
     </div>
   );
 }

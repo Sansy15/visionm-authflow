@@ -1,4 +1,5 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { LoadingState } from "@/components/pages/LoadingState";
@@ -6,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Check } from "lucide-react";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const SettingsBillingPage: React.FC = () => {
   const { sessionReady, user, profile, loading } = useProfile();
@@ -62,7 +64,7 @@ export const SettingsBillingPage: React.FC = () => {
         description="Manage your subscription and billing information"
       />
 
-      <div className="space-y-6">
+      <motion.div className="space-y-6" variants={fadeInUpVariants} initial="hidden" animate="visible">
         {/* Current Plan */}
         <Card>
           <CardHeader>
@@ -136,7 +138,7 @@ export const SettingsBillingPage: React.FC = () => {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </motion.div>
     </div>
   );
 };

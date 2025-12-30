@@ -1,10 +1,12 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { LoadingState } from "@/components/pages/LoadingState";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { BarChart3 } from "lucide-react";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const SettingsUsagePage: React.FC = () => {
   const { sessionReady, user, profile, loading } = useProfile();
@@ -46,7 +48,7 @@ export const SettingsUsagePage: React.FC = () => {
         description="Monitor your workspace usage and limits"
       />
 
-      <div className="space-y-4">
+      <motion.div className="space-y-4" variants={fadeInUpVariants} initial="hidden" animate="visible">
         {usageData.map((item) => {
           const percentage = (item.used / item.limit) * 100;
           return (
@@ -81,7 +83,7 @@ export const SettingsUsagePage: React.FC = () => {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </motion.div>
     </div>
   );
 };

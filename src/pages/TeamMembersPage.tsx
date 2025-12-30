@@ -1,10 +1,12 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { EmptyState } from "@/components/pages/EmptyState";
 import { LoadingState } from "@/components/pages/LoadingState";
 import { CompanyMembers } from "@/components/CompanyMembers";
 import { Users } from "lucide-react";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const TeamMembersPage: React.FC = () => {
   const { sessionReady, user, profile, isAdmin, loading } = useProfile();
@@ -49,11 +51,13 @@ export const TeamMembersPage: React.FC = () => {
         title="Team Members"
         description="View and manage members of your workspace"
       />
-      <CompanyMembers
-        companyId={profile.company_id}
-        company={profile.companies}
-        isAdmin={isAdmin}
-      />
+      <motion.div variants={fadeInUpVariants} initial="hidden" animate="visible">
+        <CompanyMembers
+          companyId={profile.company_id}
+          company={profile.companies}
+          isAdmin={isAdmin}
+        />
+      </motion.div>
     </div>
   );
 };

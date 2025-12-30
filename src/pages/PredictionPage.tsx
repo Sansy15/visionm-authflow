@@ -1,6 +1,7 @@
 // src/pages/PredictionPage.tsx
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import { useProfile } from "@/hooks/useProfile";
 import { useBreadcrumbs } from "@/components/app-shell/breadcrumb-context";
 import { supabase } from "@/integrations/supabase/client";
@@ -65,6 +66,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { fadeInUpVariants, staggerContainerVariants } from "@/utils/animations";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiUrl = (path: string) => {
@@ -2270,13 +2272,21 @@ const PredictionPage = () => {
   const selectedModel = models.find((m) => m.modelId === selectedModelId || m._id === selectedModelId);
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
-      <PageHeader
-        title="Prediction (Testing)"
-        description="Test and evaluate your trained models with new data"
-      />
+    <motion.div
+      className="container mx-auto py-6 space-y-6"
+      variants={staggerContainerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      <motion.div variants={fadeInUpVariants}>
+        <PageHeader
+          title="Prediction (Testing)"
+          description="Test and evaluate your trained models with new data"
+        />
+      </motion.div>
 
       {/* Tabs for New Inference and History */}
+      <motion.div variants={fadeInUpVariants}>
       <Tabs value={viewMode} onValueChange={(value) => {
         const newMode = value as "new" | "history";
         setViewMode(newMode);
@@ -2295,49 +2305,64 @@ const PredictionPage = () => {
         </TabsList>
 
         {/* Project Selection */}
-        {(inferenceStatus === "idle" || viewMode === "history") && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Select Project</CardTitle>
-              <CardDescription>Choose project scope for datasets and models</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Select value={selectedProjectId} onValueChange={handleProjectSelect} disabled={loadingProjects}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {loadingProjects ? (
-                    <SelectItem value="loading" disabled>
-                      Loading projects...
-                    </SelectItem>
-                  ) : projects.length === 0 ? (
-                    <SelectItem value="no-projects" disabled>
-                      No projects available
-                    </SelectItem>
-                  ) : (
-                    projects.map((project) => (
-                      <SelectItem key={String(project.id)} value={String(project.id)}>
-                        {project.name}
-                      </SelectItem>
-                    ))
+        <AnimatePresence mode="wait">
+          {(inferenceStatus === "idle" || viewMode === "history") && (
+            <motion.div
+              key="project-selection"
+              variants={fadeInUpVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>Select Project</CardTitle>
+                  <CardDescription>Choose project scope for datasets and models</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Select value={selectedProjectId} onValueChange={handleProjectSelect} disabled={loadingProjects}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {loadingProjects ? (
+                        <SelectItem value="loading" disabled>
+                          Loading projects...
+                        </SelectItem>
+                      ) : projects.length === 0 ? (
+                        <SelectItem value="no-projects" disabled>
+                          No projects available
+                        </SelectItem>
+                      ) : (
+                        projects.map((project) => (
+                          <SelectItem key={String(project.id)} value={String(project.id)}>
+                            {project.name}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {!selectedProjectId && (
+                    <p className="text-sm text-muted-foreground mt-2">
+                      Select a project to continue
+                    </p>
                   )}
-                </SelectContent>
-              </Select>
-              {!selectedProjectId && (
-                <p className="text-sm text-muted-foreground mt-2">
-                  Select a project to continue
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* New Inference Tab */}
         <TabsContent value="new" className="space-y-6">
           {/* Inference mode toggle */}
           {inferenceStatus === "idle" && selectedProjectId && !liveCameraMode && (
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <motion.div
+              className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+              variants={fadeInUpVariants}
+              initial="hidden"
+              animate="visible"
+            >
               <div className="space-y-1">
                 <h3 className="text-sm font-medium">Inference mode</h3>
                 <p className="text-xs text-muted-foreground">
@@ -2364,11 +2389,19 @@ const PredictionPage = () => {
                   Upload custom images
                 </Button>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* Live Camera View - Only show when liveCameraMode is active */}
+          <AnimatePresence mode="wait">
           {liveCameraMode && (
+            <motion.div
+              key="live-camera"
+              variants={fadeInUpVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+            >
             <Card className="col-span-2">
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -2529,7 +2562,9 @@ const PredictionPage = () => {
                 </div>
               </CardContent>
             </Card>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* Configuration Section */}
           {inferenceStatus === "idle" && selectedProjectId && !liveCameraMode && (
@@ -3676,6 +3711,7 @@ const PredictionPage = () => {
           )}
         </TabsContent>
       </Tabs>
+      </motion.div>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
@@ -3722,7 +3758,7 @@ const PredictionPage = () => {
 
       {/* Hidden canvas for frame capture */}
       <canvas ref={canvasRef} className="hidden" />
-    </div>
+    </motion.div>
   );
 };
 

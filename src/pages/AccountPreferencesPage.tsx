@@ -1,7 +1,9 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Settings, Bell, Palette } from "lucide-react";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const AccountPreferencesPage: React.FC = () => {
   return (
@@ -11,7 +13,7 @@ export const AccountPreferencesPage: React.FC = () => {
         description="Customize your app experience"
       />
 
-      <div className="space-y-4">
+      <motion.div className="space-y-4" variants={fadeInUpVariants} initial="hidden" animate="visible">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -45,7 +47,7 @@ export const AccountPreferencesPage: React.FC = () => {
             </p>
           </CardContent>
         </Card>
-      </div>
+      </motion.div>
     </div>
   );
 };

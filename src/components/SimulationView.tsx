@@ -1,5 +1,7 @@
 // SimulationView.tsx
 import React, { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { fadeInUpVariants, staggerContainerVariants } from "@/utils/animations";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -1222,16 +1224,28 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
 
   return (
     <div className="space-y-6">
-      <div>
+      {/* Page Header */}
+      <motion.div
+        variants={fadeInUpVariants}
+        initial="hidden"
+        animate="visible"
+      >
         <h3 className="text-2xl font-semibold mb-2">Simulation (Training)</h3>
         <p className="text-sm text-muted-foreground mb-6">
           Follow the training workflow: select dataset → choose model & hyperparameters → start training.
         </p>
-      </div>
+      </motion.div>
 
-      <div className="grid gap-6 max-w-4xl">
-        {/* Project */}
-        <Card>
+      {/* Main Content Container */}
+      <motion.div
+        variants={staggerContainerVariants}
+        initial="hidden"
+        animate="visible"
+        className="grid gap-6 max-w-4xl"
+      >
+        {/* Project Selection - Always Visible */}
+        <motion.div variants={fadeInUpVariants}>
+          <Card>
           <CardHeader>
             <CardTitle>Select Project</CardTitle>
             <CardDescription>Choose project scope for datasets</CardDescription>
@@ -1257,10 +1271,19 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
             </Select>
           </CardContent>
         </Card>
+        </motion.div>
 
-        {/* Datasets */}
-        {selectedProjectId && (
-          <Card>
+        {/* Dataset Selection - Conditional on selectedProjectId */}
+        <AnimatePresence mode="wait">
+          {selectedProjectId && (
+            <motion.div
+              key="dataset-selection"
+              variants={fadeInUpVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+            >
+              <Card>
             <CardHeader>
               <CardTitle>Select Dataset Version</CardTitle>
               <CardDescription>Choose a ready dataset for the selected project</CardDescription>
@@ -1319,7 +1342,9 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
               )}
             </CardContent>
           </Card>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Delete trained model confirmation dialog */}
         <Dialog open={showDeleteModelDialog} onOpenChange={setShowDeleteModelDialog}>
@@ -1358,9 +1383,17 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
           </DialogContent>
         </Dialog>
 
-        {/* Dataset Summary + Trained Models */}
-        {selectedDatasetId && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Dataset Summary + Trained Models - Conditional on selectedDatasetId */}
+        <AnimatePresence mode="wait">
+          {selectedDatasetId && (
+            <motion.div
+              key="dataset-details"
+              variants={staggerContainerVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+              className="grid grid-cols-1 md:grid-cols-2 gap-4"
+            >
             <Card>
               <CardHeader>
                 <CardTitle>Dataset Summary</CardTitle>
@@ -1676,12 +1709,21 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
                 )}
               </CardContent>
             </Card>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Model Type + Model Size + Hyperparameters */}
-        {selectedDatasetId && (
-          <Card>
+        {/* Model Type + Model Size + Hyperparameters - Conditional on selectedDatasetId */}
+        <AnimatePresence mode="wait">
+          {selectedDatasetId && (
+            <motion.div
+              key="model-config"
+              variants={fadeInUpVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+            >
+              <Card>
             <CardHeader>
               <CardTitle>Select Model & Hyperparameters</CardTitle>
               <CardDescription>Choose a model and tune hyperparameters</CardDescription>
@@ -1924,10 +1966,20 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
               )}
             </CardContent>
           </Card>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Progress */}
-        {jobId && (
+        {/* Progress - Conditional on jobId */}
+        <AnimatePresence mode="wait">
+          {jobId && (
+            <motion.div
+              key="training-progress"
+              variants={fadeInUpVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+            >
           <Card>
             <CardHeader>
               <CardTitle>Training Status</CardTitle>
@@ -2177,18 +2229,29 @@ export const SimulationView: React.FC<SimulationViewProps> = ({ projects, profil
               </div>
             </CardContent>
           </Card>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Start Simulation CTA */}
-        {selectedProjectId && selectedDatasetId && modelType && !isSimulating && !jobId && (
-          <div className="flex justify-end">
-            <Button onClick={() => setShowSimulateConfirm(true)} size="lg" className="gap-2">
-              <Play className="h-4 w-4" />
-              Start Training
-            </Button>
-          </div>
-        )}
-      </div>
+        {/* Start Simulation CTA - Conditional */}
+        <AnimatePresence mode="wait">
+          {selectedProjectId && selectedDatasetId && modelType && !isSimulating && !jobId && (
+            <motion.div
+              key="start-training"
+              variants={fadeInUpVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+              className="flex justify-end"
+            >
+              <Button onClick={() => setShowSimulateConfirm(true)} size="lg" className="gap-2">
+                <Play className="h-4 w-4" />
+                Start Training
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
 
       {/* Confirmation dialog */}
       <Dialog open={showSimulateConfirm} onOpenChange={setShowSimulateConfirm}>

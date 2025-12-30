@@ -42,6 +42,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { motion, AnimatePresence } from "framer-motion";
+import { fadeInUpVariants, staggerContainerVariants } from "@/utils/animations";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiUrl = (path: string) => {
@@ -1961,15 +1963,26 @@ const DatasetManager = () => {
 
   // ------- Render -------
   return (
-    <div>
-      <div ref={uploadSectionRef} className="mb-6">
+    <motion.div
+      variants={staggerContainerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      <motion.div
+        ref={uploadSectionRef}
+        className="mb-6"
+        variants={fadeInUpVariants}
+      >
         <div>
           <h2 className="text-2xl font-bold">Upload dataset for {displayProjectName}</h2>
           {companyName && <p className="text-sm text-muted-foreground">{companyName}</p>}
         </div>
-      </div>
+      </motion.div>
 
-      <div className="grid md:grid-cols-2 gap-6 mb-8">
+      <motion.div
+        className="grid md:grid-cols-2 gap-6 mb-8"
+        variants={fadeInUpVariants}
+      >
         <Card>
           <CardHeader className="cursor-pointer" onClick={() => { setLabelledOpen((p) => !p); setUnlabelledOpen(false); }}>
             <CardTitle className="flex justify-between items-center">
@@ -2063,9 +2076,12 @@ const DatasetManager = () => {
             </CardContent>
           )}
         </Card>
-      </div>
+      </motion.div>
 
-      <div className="flex items-center justify-between mb-6">
+      <motion.div
+        className="flex items-center justify-between mb-6"
+        variants={fadeInUpVariants}
+      >
         <div className="flex items-center gap-4">
           <div className="flex items-end gap-2">
             <div className="w-48">
@@ -2108,10 +2124,13 @@ const DatasetManager = () => {
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Progress bar: reflects upload / processing progress from backend only (no fake percentages) */}
-      <div className="w-full max-w-xl mb-4">
+      <motion.div
+        className="w-full max-w-xl mb-4"
+        variants={fadeInUpVariants}
+      >
         {uploadStatus !== "idle" && (
           <Progress
             value={statusPercent !== null ? Math.min(Math.max(statusPercent, 0), 100) : 100}
@@ -2123,7 +2142,7 @@ const DatasetManager = () => {
             )}
           />
         )}
-      </div>
+      </motion.div>
 
       {statusProgress && (
         <div className="text-sm text-muted-foreground mb-8 space-x-4">
@@ -2135,7 +2154,10 @@ const DatasetManager = () => {
       )}
 
       {/* Versions and Dataset Summary - Side by Side Layout */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <motion.div
+        className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6"
+        variants={fadeInUpVariants}
+      >
         {/* Versions list and Delete Button */}
         <div>
           <Card>
@@ -2240,10 +2262,18 @@ const DatasetManager = () => {
             </CardContent>
           </Card>
         )}
-      </div>
+      </motion.div>
 
       {/* File Browser - Modern File Manager View */}
+      <AnimatePresence mode="wait">
       {selectedVersionDatasetId && metadata && (
+        <motion.div
+          key="file-browser"
+          variants={fadeInUpVariants}
+          initial="hidden"
+          animate="visible"
+          exit="hidden"
+        >
         <Card className="mt-6">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -2398,7 +2428,9 @@ const DatasetManager = () => {
             </div>
           </CardContent>
         </Card>
+        </motion.div>
       )}
+      </AnimatePresence>
 
 
       {/* Image Viewer Modal */}
@@ -2728,7 +2760,7 @@ const DatasetManager = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </motion.div>
   );
 };
 

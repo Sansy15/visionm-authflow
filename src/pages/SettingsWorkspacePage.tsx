@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { LoadingState } from "@/components/pages/LoadingState";
@@ -6,6 +7,7 @@ import { EmptyState } from "@/components/pages/EmptyState";
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 import { Button } from "@/components/ui/button";
 import { Building2 } from "lucide-react";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const SettingsWorkspacePage: React.FC = () => {
   const { sessionReady, user, profile, isAdmin, loading } = useProfile();
@@ -39,7 +41,7 @@ export const SettingsWorkspacePage: React.FC = () => {
         description="Manage your workspace information and preferences"
       />
 
-      <div className="space-y-4">
+      <motion.div className="space-y-4" variants={fadeInUpVariants} initial="hidden" animate="visible">
         <div className="flex items-center justify-between p-4 border rounded-lg">
           <div>
             <h3 className="font-semibold">Workspace Profile</h3>
@@ -61,7 +63,7 @@ export const SettingsWorkspacePage: React.FC = () => {
             </p>
           </div>
         )}
-      </div>
+      </motion.div>
 
       <UserProfileDialog
         open={showProfileDialog}

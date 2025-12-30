@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { fadeInUpVariants, staggerContainerVariants } from "@/utils/animations";
 import { FolderKanban, Database, CheckCircle2, Clock, Upload, Settings, Camera } from "lucide-react";
 import { MetricCard } from "./MetricCard";
 import { QuickActionCard } from "./QuickActionCard";
@@ -93,41 +94,17 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     navigate("/project/prediction");
   };
 
-  // Animation variants for staggered entrance
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1,
-        delayChildren: 0.05,
-      },
-    },
-  };
-
-  const sectionVariants = {
-    hidden: { opacity: 0, y: 12 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        duration: 0.25,
-        ease: [0.4, 0, 0.2, 1],
-      },
-    },
-  };
-
   return (
     <motion.div
       className="space-y-8 transition-colors duration-300 ease-in-out"
       role="main"
       aria-label="Dashboard overview"
-      variants={containerVariants}
+      variants={staggerContainerVariants}
       initial="hidden"
       animate="visible"
     >
       {/* Key Metrics Cards */}
-      <motion.section aria-label="Key metrics" variants={sectionVariants}>
+      <motion.section aria-label="Key metrics" variants={fadeInUpVariants}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
           <MetricCard
             title="Active Projects"
@@ -169,7 +146,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       {/* Quick Actions and Activity Feed Row */}
       <motion.div
         className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8"
-        variants={sectionVariants}
+        variants={fadeInUpVariants}
       >
         {/* Quick Actions - takes 2 columns on large screens */}
         <section className="lg:col-span-2" aria-label="Quick actions">

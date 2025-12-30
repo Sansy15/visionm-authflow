@@ -1,8 +1,10 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Shield, Lock, Key } from "lucide-react";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const AccountSecurityPage: React.FC = () => {
   return (
@@ -12,7 +14,7 @@ export const AccountSecurityPage: React.FC = () => {
         description="Manage your account security settings"
       />
 
-      <div className="space-y-4">
+      <motion.div className="space-y-4" variants={fadeInUpVariants} initial="hidden" animate="visible">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -67,7 +69,7 @@ export const AccountSecurityPage: React.FC = () => {
             </p>
           </CardContent>
         </Card>
-      </div>
+      </motion.div>
     </div>
   );
 };

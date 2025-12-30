@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import {
   type SigninFormData,
   type ResetPasswordFormData,
 } from "@/lib/validations/authSchemas";
+import { fadeInUpVariants } from "@/utils/animations";
 
 const Auth = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -704,7 +706,13 @@ useEffect(() => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-6">
-      <Card className="w-full max-w-lg shadow-lg border border-border/70">
+      <motion.div
+        variants={fadeInUpVariants}
+        initial="hidden"
+        animate="visible"
+        className="w-full max-w-lg"
+      >
+        <Card className="w-full shadow-lg border border-border/70">
         <CardHeader className="text-center space-y-1">
           <CardTitle className="text-3xl font-bold">{headerTitle}</CardTitle>
           <CardDescription>{headerDescription}</CardDescription>
@@ -927,7 +935,8 @@ useEffect(() => {
             </form>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      </motion.div>
     </div>
   );
 };

@@ -1,9 +1,11 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { User, Shield, Settings, ArrowRight } from "lucide-react";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const AccountPage: React.FC = () => {
   const navigate = useNavigate();
@@ -15,7 +17,7 @@ export const AccountPage: React.FC = () => {
         description="Manage your account preferences and security"
       />
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <motion.div className="grid gap-4 md:grid-cols-2" variants={fadeInUpVariants} initial="hidden" animate="visible">
         <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate("/account/profile")}>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -60,7 +62,7 @@ export const AccountPage: React.FC = () => {
             </CardDescription>
           </CardHeader>
         </Card>
-      </div>
+      </motion.div>
     </div>
   );
 };

@@ -1,11 +1,13 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Settings, Building2, CreditCard, BarChart3, ArrowRight } from "lucide-react";
 import { LoadingState } from "@/components/pages/LoadingState";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -41,7 +43,7 @@ export const SettingsPage: React.FC = () => {
         description="Manage your workspace configuration and preferences"
       />
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <motion.div className="grid gap-4 md:grid-cols-2" variants={fadeInUpVariants} initial="hidden" animate="visible">
         <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate("/dashboard/settings/workspace")}>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -86,7 +88,7 @@ export const SettingsPage: React.FC = () => {
             </CardDescription>
           </CardHeader>
         </Card>
-      </div>
+      </motion.div>
     </div>
   );
 };

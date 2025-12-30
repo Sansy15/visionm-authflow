@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,7 @@ import { FormFieldWrapper } from "@/components/FormFieldWrapper";
 import { PasswordChecklist } from "@/components/PasswordChecklist";
 import { useFormValidation } from "@/hooks/useFormValidation";
 import { resetPasswordFormSchema } from "@/lib/validations/authSchemas";
+import { fadeInUpVariants } from "@/utils/animations";
 
 const ResetPassword = () => {
   const { toast } = useToast();
@@ -132,7 +134,13 @@ const ResetPassword = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-background via-background to-primary/5">
-      <Card className="w-full max-w-md">
+      <motion.div
+        variants={fadeInUpVariants}
+        initial="hidden"
+        animate="visible"
+        className="w-full max-w-md"
+      >
+        <Card className="w-full">
         <CardHeader>
           <CardTitle className="text-center text-xl">Reset Password</CardTitle>
         </CardHeader>
@@ -177,7 +185,8 @@ const ResetPassword = () => {
             </Button>
           </form>
         </CardContent>
-      </Card>
+        </Card>
+      </motion.div>
     </div>
   );
 };

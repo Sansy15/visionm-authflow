@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 import { useProfile } from "@/hooks/useProfile";
 import { PageHeader } from "@/components/pages/PageHeader";
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, FolderKanban } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { fadeInUpVariants } from "@/utils/animations";
 
 export const ProjectsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -118,39 +120,41 @@ export const ProjectsPage: React.FC = () => {
         }
       />
 
-      {projects.length === 0 ? (
-        <EmptyState
-          icon={FolderKanban}
-          title="No projects yet"
-          description="Get started by creating your first project to organize your datasets."
-          action={{
-            label: "Create Project",
-            onClick: handleCreateProject,
-          }}
-        />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
-            <Card
-              key={project.id}
-              className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => handleOpenProject(project.id)}
-            >
-              <CardHeader>
-                <CardTitle className="line-clamp-1">{project.name}</CardTitle>
-                <CardDescription className="line-clamp-2">
-                  {project.description || "No description"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">
-                  Created {new Date(project.created_at).toLocaleDateString()}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <motion.div variants={fadeInUpVariants} initial="hidden" animate="visible">
+        {projects.length === 0 ? (
+          <EmptyState
+            icon={FolderKanban}
+            title="No projects yet"
+            description="Get started by creating your first project to organize your datasets."
+            action={{
+              label: "Create Project",
+              onClick: handleCreateProject,
+            }}
+          />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {projects.map((project) => (
+              <Card
+                key={project.id}
+                className="cursor-pointer hover:shadow-md transition-shadow"
+                onClick={() => handleOpenProject(project.id)}
+              >
+                <CardHeader>
+                  <CardTitle className="line-clamp-1">{project.name}</CardTitle>
+                  <CardDescription className="line-clamp-2">
+                    {project.description || "No description"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xs text-muted-foreground">
+                    Created {new Date(project.created_at).toLocaleDateString()}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </motion.div>
     </div>
   );
 };

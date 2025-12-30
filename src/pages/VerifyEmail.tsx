@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { motion } from "framer-motion";
+import { fadeInUpVariants } from "@/utils/animations";
 
 const VerifyEmail = () => {
   const navigate = useNavigate();
@@ -32,7 +34,13 @@ const VerifyEmail = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-6">
-      <Card className="w-full max-w-md text-center shadow-lg border border-border/70">
+      <motion.div
+        variants={fadeInUpVariants}
+        initial="hidden"
+        animate="visible"
+        className="w-full max-w-md"
+      >
+        <Card className="w-full text-center shadow-lg border border-border/70">
         <CardHeader>
           <div className="flex justify-center mb-4">
             <div className="h-16 w-16 rounded-full bg-green-100 flex items-center justify-center">
@@ -51,7 +59,8 @@ const VerifyEmail = () => {
             Go to Sign In now
           </Button>
         </CardContent>
-      </Card>
+        </Card>
+      </motion.div>
     </div>
   );
 };

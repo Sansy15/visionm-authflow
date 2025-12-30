@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useEffect } from "react";
+import { motion } from "framer-motion";
+import { fadeInUpVariants } from "@/utils/animations";
 
 const Landing = () => {
   const navigate = useNavigate();
@@ -41,33 +43,39 @@ const Landing = () => {
           </div>
         </nav>
 
-        {/* HERO */}
-        <header className="container mx-auto px-6 py-20 flex-1">
-          <div className="max-w-3xl mx-auto text-center">
-            <h2 className="text-white dark:text-white text-4xl md:text-6xl font-extrabold leading-tight drop-shadow-[0_8px_20px_rgba(0,0,0,0.6)]">
-              Manage Your Dataset Projects{" "}
-              <span className="text-primary">Efficiently</span>
-            </h2>
+        {/* HERO + FEATURE CARDS - wrapped together in ONE motion container */}
+        <motion.div
+          variants={fadeInUpVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          {/* HERO */}
+          <header className="container mx-auto px-6 py-20 flex-1">
+            <div className="max-w-3xl mx-auto text-center">
+              <h2 className="text-white dark:text-white text-4xl md:text-6xl font-extrabold leading-tight drop-shadow-[0_8px_20px_rgba(0,0,0,0.6)]">
+                Manage Your Dataset Projects{" "}
+                <span className="text-primary">Efficiently</span>
+              </h2>
 
-            <p className="mt-6 text-lg md:text-xl text-white/90 dark:text-white/80 max-w-2xl mx-auto drop-shadow-sm">
-              VisionM helps teams collaborate on computer vision datasets with secure
-              project management, workspace controls, and seamless file uploads.
-            </p>
+              <p className="mt-6 text-lg md:text-xl text-white/90 dark:text-white/80 max-w-2xl mx-auto drop-shadow-sm">
+                VisionM helps teams collaborate on computer vision datasets with secure
+                project management, workspace controls, and seamless file uploads.
+              </p>
 
-            <div className="flex gap-4 justify-center pt-8">
-              <Button size="lg" onClick={() => navigate("/auth?mode=signup")}>
-                Create Account
-              </Button>
-              <Button size="lg" variant="outline" onClick={() => navigate("/auth")}>
-                Sign In
-              </Button>
+              <div className="flex gap-4 justify-center pt-8">
+                <Button size="lg" onClick={() => navigate("/auth?mode=signup")}>
+                  Create Account
+                </Button>
+                <Button size="lg" variant="outline" onClick={() => navigate("/auth")}>
+                  Sign In
+                </Button>
+              </div>
             </div>
-          </div>
-        </header>
+          </header>
 
-        {/* FEATURE CARDS - glassy background so they pop on top of the image */}
-        <main className="container mx-auto px-6 pb-20 -mt-8">
-          <div className="mt-8 grid md:grid-cols-3 gap-8">
+          {/* FEATURE CARDS - glassy background so they pop on top of the image */}
+          <main className="container mx-auto px-6 pb-20 -mt-8">
+            <div className="mt-8 grid md:grid-cols-3 gap-8">
             <div className="p-6 rounded-lg bg-background/90 dark:bg-background/80 backdrop-blur-md border border-border/20 shadow-md">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
                 {/* icon */}
@@ -98,8 +106,9 @@ const Landing = () => {
               <h3 className="text-lg font-semibold mb-2 text-foreground">Dataset Uploads</h3>
               <p className="text-muted-foreground text-sm">Upload folders or multiple files with validation, versioning, and real-time processing status.</p>
             </div>
-          </div>
-        </main>
+            </div>
+          </main>
+        </motion.div>
 
         {/* FOOTER */}
         <footer className="bg-gradient-to-r from-background/40 to-primary/20 backdrop-blur-sm border-t border-primary/30 py-3 text-center">
