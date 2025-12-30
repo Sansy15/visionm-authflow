@@ -20,6 +20,18 @@ const ResetPassword = () => {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [passwordStrengthError, setPasswordStrengthError] = useState(false);
 
+  // Force light theme on reset password page (no dark mode)
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    return () => {
+      // Restore user's theme preference when leaving (if stored)
+      const stored = localStorage.getItem("visionm-theme");
+      if (stored === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    };
+  }, []);
+
   const resetPasswordForm = useFormValidation({
     schema: resetPasswordFormSchema,
     initialValues: {

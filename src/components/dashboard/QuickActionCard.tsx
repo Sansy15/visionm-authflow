@@ -41,7 +41,7 @@ export const QuickActionCard: React.FC<QuickActionCardProps> = ({
       aria-describedby={`${title}-description`}
       aria-disabled={disabled}
       className={cn(
-        "h-full cursor-pointer transition-all duration-200 transition-colors duration-300 ease-in-out group",
+        "h-full cursor-pointer transition-all duration-300 ease-in-out group",
         "shadow-sm dark:shadow-black/30 shadow-md",
         "hover:shadow-md dark:hover:shadow-black/50",
         "hover:shadow-lg hover:scale-[1.02] hover:border-primary/50 hover:bg-accent/10",

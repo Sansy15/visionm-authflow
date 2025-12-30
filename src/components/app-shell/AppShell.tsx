@@ -197,7 +197,13 @@ const AppShellContent = () => {
       <div className="flex flex-1 overflow-hidden relative transition-colors duration-300 ease-in-out">
         {/* Desktop Sidebar */}
         {!isMobile && (
-          <div className="border-r bg-background">
+          <div
+            className={cn(
+              "transition-all duration-300 ease-in-out overflow-hidden border-r bg-background",
+              "shadow-sm dark:shadow-none",
+              isOpen ? "w-64" : "w-16"
+            )}
+          >
             <AppSidebar />
           </div>
         )}

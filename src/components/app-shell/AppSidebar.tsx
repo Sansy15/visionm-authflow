@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Dialog,
@@ -28,6 +28,12 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface AppSidebarProps {
   onNavigate?: () => void;
@@ -36,6 +42,7 @@ interface AppSidebarProps {
 export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { profile, isAdmin, company, loading: profileLoading } = useProfile();
   const { toast } = useToast();
   const { isOpen, toggleSidebar } = useSidebar();
@@ -144,13 +151,16 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
 
   const isActive = (path: string) => location.pathname === path;
   const isActiveStartsWith = (path: string) => location.pathname.startsWith(path);
+  const viewParam = searchParams.get("view");
 
   const navItems = [
     {
       label: "Overview",
       icon: LayoutDashboard,
       href: "/dashboard",
-      active: isActive("/dashboard") && !location.pathname.includes("/dashboard/"),
+      active: isActive("/dashboard") && 
+              !location.pathname.includes("/dashboard/") && 
+              (!viewParam || viewParam === "overview"),
     },
     {
       label: "Projects",
@@ -187,85 +197,157 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
     <>
       <aside className={cn(
         "border-r min-h-[calc(100vh-4rem)] h-full",
-        "transition-all duration-300 ease-in-out transition-colors",
+        "transition-all duration-300 ease-in-out",
         "bg-background dark:bg-background",
         "bg-slate-50/50",
-        isOpen ? "w-64" : "w-12"
+        isOpen ? "w-64" : "w-16"
       )}>
-        <nav className="p-4 space-y-1 h-full flex flex-col">
+        <nav className={cn("h-full flex flex-col", isOpen ? "p-4 space-y-1" : "p-3 space-y-2")}>
           {/* Sidebar Toggle Button - Above Overview */}
           {!isMobile && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "mb-2 transition-all duration-200 flex-shrink-0",
-                isOpen ? "w-full justify-start" : "w-full justify-center"
-              )}
-              onClick={(e) => {
-                e.preventDefault();
-                toggleSidebar();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggleSidebar();
-                }
-              }}
-              aria-label={isOpen ? "Close sidebar" : "Open sidebar"}
-              aria-expanded={isOpen}
-            >
-              <Menu className="h-5 w-5" />
-              {isOpen && <span className="ml-2">Menu</span>}
-            </Button>
+            <TooltipProvider>
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "mb-2 transition-all duration-200 flex-shrink-0",
+                      isOpen ? "w-full justify-start" : "w-full justify-center p-0"
+                    )}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      toggleSidebar();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleSidebar();
+                      }
+                    }}
+                    aria-label={isOpen ? "Close sidebar" : "Open sidebar"}
+                    aria-expanded={isOpen}
+                  >
+                    {isOpen ? (
+                      <>
+                        <Menu className="h-5 w-5" />
+                        <span className="ml-2">Menu</span>
+                      </>
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10 dark:bg-primary/20 border border-primary/20 hover:bg-primary/20 dark:hover:bg-primary/30 hover:scale-105 transition-all duration-200">
+                        <Menu className="h-5 w-5 text-primary drop-shadow-[0_0_8px_hsl(var(--primary)/0.5)]" />
+                      </div>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                {!isOpen && (
+                  <TooltipContent side="right" className="ml-2">
+                    <p>Menu</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
           )}
 
-          <div className={cn("flex-1 overflow-y-auto", !isOpen && !isMobile && "hidden")}>
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const hasChildren = item.children && item.children.length > 0;
-              const isProjectsExpanded = projectsOpen && item.label === "Projects";
-              const isTeamExpanded = teamOpen && item.label === "Team";
+          <div className="flex-1 overflow-y-auto">
+            <TooltipProvider>
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const hasChildren = item.children && item.children.length > 0;
+                const isProjectsExpanded = projectsOpen && item.label === "Projects";
+                const isTeamExpanded = teamOpen && item.label === "Team";
 
-              return (
-                <div key={item.label}>
+                const navButton = (
                   <Button
                     variant={item.active ? "secondary" : "ghost"}
                     className={cn(
-                      "w-full justify-start transition-all duration-200",
-                      item.active && cn(
+                      "transition-all duration-200",
+                      isOpen ? "w-full justify-start" : "w-full justify-center p-0",
+                      !isOpen && "h-auto",
+                      item.active && isOpen && cn(
                         "bg-primary/10 dark:bg-primary/20",
                         "bg-primary/15",
                         "border-l-2 border-l-primary"
                       )
                     )}
                     onClick={() => {
-                      if (item.label === "Projects") {
-                        setProjectsOpen(!projectsOpen);
-                        if (projectsOpen) setManageOpen(false);
+                      if (item.label === "Overview") {
+                        // Always navigate to clean /dashboard route
+                        navigate("/dashboard", { replace: false });
+                        onNavigate?.();
+                      } else if (item.label === "Projects") {
+                        if (!isOpen) {
+                          toggleSidebar();
+                        } else {
+                          setProjectsOpen(!projectsOpen);
+                          if (projectsOpen) setManageOpen(false);
+                        }
                       } else if (item.label === "Team") {
-                        setTeamOpen(!teamOpen);
+                        if (!isOpen) {
+                          toggleSidebar();
+                        } else {
+                          setTeamOpen(!teamOpen);
+                        }
                       } else if (!hasChildren) {
                         navigate(item.href);
                         onNavigate?.();
                       }
                     }}
                   >
-                    <Icon className="h-4 w-4 flex-shrink-0 mr-2" />
-                    <span>{item.label}</span>
-                    {hasChildren && (
-                      <span className="ml-auto">
-                        {(isProjectsExpanded || isTeamExpanded) ? (
-                          <ChevronDown className="h-4 w-4" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4" />
+                    {isOpen ? (
+                      <>
+                        <Icon className="h-4 w-4 flex-shrink-0 mr-2" />
+                        <span>{item.label}</span>
+                        {hasChildren && (
+                          <span className="ml-auto">
+                            {(isProjectsExpanded || isTeamExpanded) ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </span>
                         )}
-                      </span>
+                      </>
+                    ) : (
+                      <div className={cn(
+                        "w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200",
+                        "bg-primary/10 dark:bg-primary/20",
+                        "border border-primary/20",
+                        "hover:bg-primary/20 dark:hover:bg-primary/30",
+                        "hover:scale-105",
+                        item.active && cn(
+                          "bg-primary/20 dark:bg-primary/30",
+                          "border-primary/40",
+                          "shadow-[0_0_12px_hsl(var(--primary)/0.4)]"
+                        )
+                      )}>
+                        <Icon className={cn(
+                          "h-5 w-5 text-primary transition-all duration-200",
+                          "drop-shadow-[0_0_8px_hsl(var(--primary)/0.5)]",
+                          item.active && "drop-shadow-[0_0_12px_hsl(var(--primary)/0.7)]"
+                        )} />
+                      </div>
                     )}
                   </Button>
+                );
+
+                return (
+                  <div key={item.label}>
+                    {isOpen ? (
+                      navButton
+                    ) : (
+                      <Tooltip delayDuration={0}>
+                        <TooltipTrigger asChild>
+                          {navButton}
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="ml-2">
+                          <p>{item.label}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
 
                   {/* Team submenu */}
-                  {item.label === "Team" && isTeamExpanded && (
+                  {item.label === "Team" && isTeamExpanded && isOpen && (
                     <div className="ml-6 mt-1 space-y-1">
                       {item.children?.map((child) => (
                         <Button
@@ -292,7 +374,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
                   )}
 
                   {/* Projects submenu */}
-                  {item.label === "Projects" && isProjectsExpanded && (
+                  {item.label === "Projects" && isProjectsExpanded && isOpen && (
                     <div className="ml-6 mt-1 space-y-1">
                       <div className="relative">
                       <Button
@@ -425,6 +507,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onNavigate }) => {
                 </div>
               );
             })}
+            </TooltipProvider>
           </div>
         </nav>
       </aside>

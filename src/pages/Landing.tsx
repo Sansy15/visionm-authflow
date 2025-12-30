@@ -1,20 +1,34 @@
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 
 const Landing = () => {
   const navigate = useNavigate();
 
+  // Force light theme on landing page (no dark mode)
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    return () => {
+      // Restore user's theme preference when leaving (if stored)
+      const stored = localStorage.getItem("visionm-theme");
+      if (stored === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    };
+  }, []);
+
   return (
-    // Background image with a dark gradient overlay for consistent contrast
+    // Background image with theme-aware gradient overlay for consistent contrast
     <div
-      className="min-h-screen bg-cover bg-center bg-no-repeat"
+      className="min-h-screen bg-cover bg-center bg-no-repeat relative"
       style={{
-        backgroundImage:
-          "linear-gradient(rgba(3,7,18,0.75), rgba(3,7,18,0.45)), url('/landing-bg.jpg')",
+        backgroundImage: "url('/landing-bg.jpg')",
       }}
     >
+      {/* Theme-aware overlay: darker in light mode, lighter in dark mode for better contrast */}
+      <div className="absolute inset-0 bg-black/75 dark:bg-black/60" />
       {/* Content wrapper ensures everything sits above the image */}
-      <div className="min-h-screen flex flex-col">
+      <div className="min-h-screen flex flex-col relative z-10">
         {/* NAV - reduced height, semi-transparent */}
         <nav className="bg-gradient-to-r from-primary/20 via-background/40 to-primary/20 backdrop-blur-sm border-b border-primary/30 shadow-md">
           <div className="container mx-auto px-6 py-3 flex justify-between items-center">
@@ -30,12 +44,12 @@ const Landing = () => {
         {/* HERO */}
         <header className="container mx-auto px-6 py-20 flex-1">
           <div className="max-w-3xl mx-auto text-center">
-            <h2 className="text-white text-4xl md:text-6xl font-extrabold leading-tight drop-shadow-[0_8px_20px_rgba(0,0,0,0.6)]">
+            <h2 className="text-white dark:text-white text-4xl md:text-6xl font-extrabold leading-tight drop-shadow-[0_8px_20px_rgba(0,0,0,0.6)]">
               Manage Your Dataset Projects{" "}
               <span className="text-primary">Efficiently</span>
             </h2>
 
-            <p className="mt-6 text-lg md:text-xl text-white/80 max-w-2xl mx-auto drop-shadow-sm">
+            <p className="mt-6 text-lg md:text-xl text-white/90 dark:text-white/80 max-w-2xl mx-auto drop-shadow-sm">
               VisionM helps teams collaborate on computer vision datasets with secure
               project management, workspace controls, and seamless file uploads.
             </p>
@@ -54,7 +68,7 @@ const Landing = () => {
         {/* FEATURE CARDS - glassy background so they pop on top of the image */}
         <main className="container mx-auto px-6 pb-20 -mt-8">
           <div className="mt-8 grid md:grid-cols-3 gap-8">
-            <div className="p-6 rounded-lg bg-white/80 backdrop-blur-md border border-border/20 shadow-md">
+            <div className="p-6 rounded-lg bg-background/90 dark:bg-background/80 backdrop-blur-md border border-border/20 shadow-md">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
                 {/* icon */}
                 <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -65,7 +79,7 @@ const Landing = () => {
               <p className="text-muted-foreground text-sm">Enterprise-grade security with email verification and approval workflows for workspace access.</p>
             </div>
 
-            <div className="p-6 rounded-lg bg-white/80 backdrop-blur-md border border-border/20 shadow-md">
+            <div className="p-6 rounded-lg bg-background/90 dark:bg-background/80 backdrop-blur-md border border-border/20 shadow-md">
               <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center mb-3">
                 <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -75,7 +89,7 @@ const Landing = () => {
               <p className="text-muted-foreground text-sm">Create and manage multiple projects with granular access controls and project passwords.</p>
             </div>
 
-            <div className="p-6 rounded-lg bg-white/80 backdrop-blur-md border border-border/20 shadow-md">
+            <div className="p-6 rounded-lg bg-background/90 dark:bg-background/80 backdrop-blur-md border border-border/20 shadow-md">
               <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center mb-3">
                 <svg className="w-5 h-5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />

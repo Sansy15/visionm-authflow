@@ -33,3 +33,4 @@ export function clearLastRoute() {
     console.error("[routePersistence] Failed to clear last route:", error);
   }
 }
+

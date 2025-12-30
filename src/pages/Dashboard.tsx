@@ -1,6 +1,7 @@
 // src/pages/Dashboard.tsx
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -186,10 +187,10 @@ const Dashboard = () => {
     // Handle view parameter (e.g., ?view=simulation)
     if (view && ["overview", "projects", "simulation", "members"].includes(view)) {
       setActiveView(view as ViewMode);
-      // Clear view param from URL after setting
-      const newParams = new URLSearchParams(searchParams);
-      newParams.delete("view");
-      setSearchParams(newParams);
+      // Keep view param in URL so sidebar can read it for active state
+    } else if (!view) {
+      // If no view param, default to overview
+      setActiveView("overview");
     }
     
     // Handle join request approve/reject from email links
@@ -958,13 +959,32 @@ const Dashboard = () => {
     return <LoadingState message="Loading dashboard..." />;
   }
 
+  // Animation variant for PageHeader (optional)
+  const headerVariants = {
+    hidden: { opacity: 0, y: 12 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: {
+        duration: 0.25,
+        ease: [0.4, 0, 0.2, 1],
+      },
+    },
+  };
+
   return (
     <div>
       {activeView !== "simulation" && (
-        <PageHeader
-          title={`Welcome, ${displayName}`}
-          description="Manage your projects, datasets, and simulation workspace from this dashboard."
-        />
+        <motion.div
+          variants={headerVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          <PageHeader
+            title={`Welcome, ${displayName}`}
+            description="Manage your projects, datasets, and simulation workspace from this dashboard."
+          />
+        </motion.div>
       )}
 
       {/* CONTENT: Overview placeholder (default) */}

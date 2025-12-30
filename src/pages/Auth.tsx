@@ -39,6 +39,18 @@ const Auth = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  // Force light theme on auth pages (no dark mode)
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    return () => {
+      // Restore user's theme preference when leaving (if stored)
+      const stored = localStorage.getItem("visionm-theme");
+      if (stored === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    };
+  }, []);
+
   const [loading, setLoading] = useState(false);
   
   // Get invite token from URL if present

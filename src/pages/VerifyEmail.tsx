@@ -6,6 +6,18 @@ import { Button } from "@/components/ui/button";
 const VerifyEmail = () => {
   const navigate = useNavigate();
 
+  // Force light theme on verify email page (no dark mode)
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    return () => {
+      // Restore user's theme preference when leaving (if stored)
+      const stored = localStorage.getItem("visionm-theme");
+      if (stored === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const timer = setTimeout(() => {
       navigate("/auth?mode=signin");

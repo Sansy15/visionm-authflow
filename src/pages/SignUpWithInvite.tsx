@@ -10,6 +10,18 @@ export default function SignUpWithInvite() {
   const inviteToken = searchParams.get("invite") ?? searchParams.get("project_invite"); // support both
   const navigate = useNavigate();
 
+  // Force light theme on sign up page (no dark mode)
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    return () => {
+      // Restore user's theme preference when leaving (if stored)
+      const stored = localStorage.getItem("visionm-theme");
+      if (stored === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    };
+  }, []);
+
   const [loading, setLoading] = useState(false);
   const [validating, setValidating] = useState(!!inviteToken);
   const [inviteData, setInviteData] = useState<any>(null);
@@ -104,12 +116,13 @@ export default function SignUpWithInvite() {
     }
   }
 
-  if (validating) return <div>Validating invite...</div>;
+  if (validating) return <div className="min-h-screen flex items-center justify-center bg-background text-foreground">Validating invite...</div>;
   return (
-    <div className="max-w-md mx-auto p-6">
-      <h2 className="text-2xl font-bold mb-4">Create account</h2>
+    <div className="min-h-screen flex items-center justify-center bg-background p-6">
+      <div className="max-w-md w-full">
+        <h2 className="text-2xl font-bold mb-4 text-foreground">Create account</h2>
 
-      {errorMsg && <div className="text-red-600 mb-4">{errorMsg}</div>}
+        {errorMsg && <div className="text-destructive mb-4">{errorMsg}</div>}
 
       <form onSubmit={handleSignUp} className="space-y-4">
         <label>
@@ -126,6 +139,7 @@ export default function SignUpWithInvite() {
           <Button type="submit" disabled={loading}>{loading ? "Creating..." : "Create account"}</Button>
         </div>
       </form>
+      </div>
     </div>
   );
 }
